@@ -10,10 +10,10 @@ import math
 # =============================================================================
 # 机器人物理参数 [需适配]
 # =============================================================================
-ROBOT_RADIUS = 0.35                # 机器人外接圆半径 (m)，用于避障安全距离计算
-ROBOT_MAX_LINEAR_VEL = 0.8         # 最大线速度 (m/s)
+ROBOT_RADIUS = 0.5448                # 机器人外接圆半径 (m)，用于避障安全距离计算
+ROBOT_MAX_LINEAR_VEL = 1.4        # 最大线速度 (m/s)
 ROBOT_MAX_ANGULAR_VEL = 1.5        # 最大角速度 (rad/s)
-ROBOT_WHEEL_BASE = 0.5             # 差速轮间距 (m)，用于运动学计算
+ROBOT_WHEEL_BASE = 0.448             # 差速轮间距 (m)，用于运动学计算
 
 # =============================================================================
 # LiDAR 配置 [需适配]
@@ -32,7 +32,7 @@ LIDAR_FREQ = 30                    # 扫描频率 (Hz)
 LIDAR_ANGLE_MIN = -90.0            # 最小角度 (deg)
 LIDAR_ANGLE_MAX = 90.0             # 最大角度 (deg)
 LIDAR_ANGLE_STEP = 0.5             # 角度步进 (deg)
-LIDAR_MAX_RANGE = 40.0             # 最大探测距离 (m)
+LIDAR_MAX_RANGE = 20.0             # 最大探测距离 (m)
 LIDAR_MIN_RANGE = 0.001            # 最小探测距离 (m)
 
 # =============================================================================
@@ -47,32 +47,33 @@ MAP_POINTS_NPY_PATH = "./maps/map_points.npy"
 # =============================================================================
 # 四个Intel深度相机的安装参数
 # 每个相机: (名称, x偏移, y偏移, z偏移, yaw偏移deg, pitch偏移deg)
+# TODO 测量外参：x、 y z yaw pitch 
 CAMERAS = {
     "head": {
         "x": 0.0, "y": 0.0, "z": 1.2,       # 头部相机位置
         "yaw": 0.0, "pitch": -10.0,           # 朝向 (略微向下看)
-        "hfov": 87.0,                          # 水平视场角 (deg)，Intel D435i约87°
+        "hfov": 79.15,                          # 水平视场角 (deg)，Intel D435i约87°
         "image_width": 640,                    # [需适配] 图像宽度
         "image_height": 480,                   # [需适配] 图像高度
     },
     "chest": {
         "x": 0.0, "y": 0.0, "z": 0.8,
         "yaw": 0.0, "pitch": 0.0,
-        "hfov": 87.0,
+        "hfov": 79.16,
         "image_width": 640,
         "image_height": 480,
     },
     "left_arm": {
         "x": 0.0, "y": 0.25, "z": 0.9,
         "yaw": 30.0, "pitch": 0.0,
-        "hfov": 87.0,
+        "hfov": 78.69,
         "image_width": 640,
         "image_height": 480,
     },
     "right_arm": {
         "x": 0.0, "y": -0.25, "z": 0.9,
         "yaw": -30.0, "pitch": 0.0,
-        "hfov": 87.0,
+        "hfov": 79.38,
         "image_width": 640,
         "image_height": 480,
     },
@@ -94,7 +95,7 @@ DETECTION_INTERVAL_MS = 100            # 视觉检测间隔 (ms)，即约10fps
 CLUSTER_EPS = 0.15                 # DBSCAN聚类半径 (m)，人腿直径约10-15cm
 CLUSTER_MIN_POINTS = 3             # 最小聚类点数
 CLUSTER_MAX_POINTS = 50            # 最大聚类点数（超过的可能是墙壁等大物体）
-LEG_MIN_RADIUS = 0.03              # 人腿最小半径 (m)
+LEG_MIN_RADIUS = 0.05              # 人腿最小半径 (m)
 LEG_MAX_RADIUS = 0.15              # 人腿最大半径 (m)
 LEG_PAIR_MIN_DIST = 0.10           # 两腿最小间距 (m)
 LEG_PAIR_MAX_DIST = 0.50           # 两腿最大间距 (m)

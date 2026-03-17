@@ -40,14 +40,15 @@ from .agv_client import AGVClient
 #如果需要使用其它端口，在这里添加即可
 PORT_CONFIG: dict[int, AGVConfig] = {
     19204: AGVConfig(port=19204),   # 状态
-    # 19205: AGVConfig(port=19205),   # 控制
+    19205: AGVConfig(port=19205),   # 控制
     19206: AGVConfig(port=19206),   # 导航
     19207: AGVConfig(port=19207),   # 配置
     19210: AGVConfig(port=19210),   # 其它
+    19301: AGVConfig(port=19301),   # 推送
 }
 
 # AGV 主动推送的 cmd_id（收到后放入 push_queue）
-PUSH_CMD_IDS = ("0BEC", "0BE9")   # 导航完成、导航状态
+PUSH_CMD_IDS = ("4B65")  
 
 
 # ── 消息类型 ──────────────────────────────────────────────────────────────
@@ -283,6 +284,7 @@ class AGVManager:
         except queue.Empty:
             return None
 
+agv_manager = AGVManager()
 
 # ── Demo ──────────────────────────────────────────────────────────────────
 

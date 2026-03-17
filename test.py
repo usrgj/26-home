@@ -4,8 +4,17 @@ API参考
 https://seer-group.feishu.cn/wiki/X0LSw4NRRiXTtGksoMxcQ4knnxh
 '''
 from __future__ import annotations
-from agv_api import AGVManager
+from agv_api import AGVManager, agv_manager
 import time
+# from camera.config import CAMERA_CHEST
+# from camera import camera_manager
+
+PORT_STATUS = 19204
+PORT_CONTROL = 19205
+PORT_NAVIGATION = 19206
+PORT_CONFIGUE = 19207
+PORT_OTHER = 19210
+PROT_PUSH = 19301
 
 # ── Demo ──────────────────────────────────────────────────────────────────
 
@@ -42,8 +51,34 @@ if __name__ == "__main__":
         # result = mgr.query(19204, "03F3")
         # print(result.response["data"])
 
-        result = mgr.query(19207, "0FAB",data={"map_name":"3_15"})
-        print(result.response["data"])
+        # result = mgr.query(19207, "0FAB",data={"map_name":"3_15"})
+        # print(result.response["data"])
+
+        # 查询机器人位置
+        # result = mgr.query(19204, "03EC")
+        # info = result.response["data"]
+
+        # 开环运动控制
+        # result = mgr.query(PORT_CONTROL, "07DA", data={"vx": 0.5, "vy": 0.0, "w": 0.0, "duration": 0})
+        # print(result.response["data"]["err_msg"])
+        # time.sleep(5)
+
+        # 机器人主动推送
+        mgr.send(19301, "9300", data={"interval": 200, "included_fields": [
+            "x",
+            "y",
+            "create_on"
+        ]})
+        time.sleep(2)
+        print(mgr.poll())
+
+    
+    # mgr = agv_manager
+    # mgr.start()
+    # try:
+    #     None
+    # finally:
+    #     mgr.stop()
 
         
     print("[主线程] 程序正常结束")

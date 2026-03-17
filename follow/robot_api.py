@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple
 
 
+
 # =============================================================================
 # 数据结构定义
 # =============================================================================
@@ -102,28 +103,18 @@ class RobotAPI:
         [需适配] 初始化与机器人的连接。
         例如：建立TCP连接、初始化SDK、连接相机等。
         """
-        self._connected = False
-        # ---------------------------------------------------------------
-        # 示例：如果你的机器人用TCP通信
-        # import socket
-        # self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # self._socket.connect(("192.168.1.100", 19200))
-        # ---------------------------------------------------------------
+        from agv_api import agv_manager
+        from camera import camera_manager
+        from camera.config import CAMERA_CHEST, CAMERA_HEAD, CAMERA_LEFT, CAMERA_RIGHT
+        self._agv = agv_manager
+
+        self.camera_head = camera_manager.get(CAMERA_HEAD)
+        self.camera_chest = camera_manager.get(CAMERA_CHEST)
+        self.camera_left = camera_manager.get(CAMERA_LEFT)
+        self.camera_right = camera_manager.get(CAMERA_RIGHT)
+
         
-        # ---------------------------------------------------------------
-        # 示例：如果你用Intel RealSense相机
-        # import pyrealsense2 as rs
-        # self._pipelines = {}
-        # for cam_name, cam_serial in CAMERA_SERIALS.items():
-        #     pipeline = rs.pipeline()
-        #     config = rs.config()
-        #     config.enable_device(cam_serial)
-        #     config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-        #     config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-        #     pipeline.start(config)
-        #     self._pipelines[cam_name] = pipeline
-        # ---------------------------------------------------------------
-        print("[RobotAPI] 初始化完成 (当前为占位实现，请替换为实际API)")
+        print("自动跟随初始化")
     
     # =====================================================================
     # 位姿与速度获取
@@ -150,8 +141,9 @@ class RobotAPI:
         #     timestamp=time.time()
         # )
         # ---------------------------------------------------------------
-        raise NotImplementedError("请实现 get_robot_pose()，调用你的机器人API获取世界坐标位姿")
-    
+        result = self._agv.query(19204, "03EC")
+
+
     def get_robot_velocity(self) -> RobotVelocity:
         """
         [需适配] 获取机器人在机器人坐标系下的速度。
@@ -265,8 +257,7 @@ class RobotAPI:
         #     "angular_velocity": angular_vel
         # })
         # ---------------------------------------------------------------
-        raise NotImplementedError("请实现 send_velocity()")
-    
+        self._agv.send(19206, "0BEF", )    
     def send_arc_motion(self, linear_vel: float, radius: float):
         """
         [需适配] 发送圆弧运动指令。
