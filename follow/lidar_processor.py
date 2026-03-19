@@ -12,17 +12,18 @@ lidar_processor.py — LiDAR数据处理模块
 import math
 import time
 import numpy as np
+from sklearn.cluster import DBSCAN
 from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass, field
 
-from config import (
+from .config import (
     LIDAR_FRONT_X, LIDAR_FRONT_YAW, LIDAR_REAR_X, LIDAR_REAR_YAW,
     LIDAR_MAX_RANGE, LIDAR_MIN_RANGE,
     CLUSTER_EPS, CLUSTER_MIN_POINTS, CLUSTER_MAX_POINTS,
     LEG_MIN_RADIUS, LEG_MAX_RADIUS, LEG_PAIR_MIN_DIST, LEG_PAIR_MAX_DIST,
     MAP_DIFF_THRESHOLD,
 )
-from robot_api import LidarScan, LidarBeam, RobotPose
+from .robot_api import LidarScan, LidarBeam, RobotPose
 
 
 @dataclass
@@ -147,11 +148,13 @@ class LidarProcessor:
         # Step 1: 合并所有LiDAR扫描为统一的机器人坐标系点云
         all_local_points = self._merge_scans(scans)
         if len(all_local_points) == 0:
+            print("合并后雷达数据为空！")
             return []
         
         # Step 2: 与静态地图差分，提取动态点
         dynamic_points = self._filter_dynamic_points(all_local_points, robot_pose)
         if len(dynamic_points) == 0:
+            print("未提取到动态点！")
             return []
         
         # Step 3: DBSCAN聚类
@@ -279,74 +282,40 @@ class LidarProcessor:
     
     def _cluster_points(self, points: List[Tuple[float, float]]) -> List[Cluster]:
         """
-        对2D点集进行DBSCAN聚类。
-        
-        使用简单的DBSCAN实现（不依赖sklearn），适用于点数较少的情况。
-        如果你的场景点数很多，建议替换为sklearn.cluster.DBSCAN。
+        对2D点集进行DBSCAN聚类（基于sklearn，使用BallTree加速）。
         """
         if len(points) == 0:
             return []
-        
+
         pts = np.array(points)
-        n = len(pts)
-        labels = np.full(n, -1, dtype=int)  # -1表示未分类
-        cluster_id = 0
-        
-        for i in range(n):
-            if labels[i] != -1:
-                continue
-            
-            # 找到所有距离 < CLUSTER_EPS 的邻居
-            dists = np.sqrt(np.sum((pts - pts[i]) ** 2, axis=1))
-            neighbors = np.where(dists < CLUSTER_EPS)[0]
-            
-            if len(neighbors) < CLUSTER_MIN_POINTS:
-                continue  # 噪声点
-            
-            # 开始一个新聚类
-            labels[i] = cluster_id
-            seed_set = list(neighbors)
-            j = 0
-            while j < len(seed_set):
-                q = seed_set[j]
-                if labels[q] == -1 or labels[q] == -2:  # 未分类或噪声
-                    labels[q] = cluster_id
-                    q_dists = np.sqrt(np.sum((pts - pts[q]) ** 2, axis=1))
-                    q_neighbors = np.where(q_dists < CLUSTER_EPS)[0]
-                    if len(q_neighbors) >= CLUSTER_MIN_POINTS:
-                        seed_set.extend(q_neighbors.tolist())
-                j += 1
-            
-            cluster_id += 1
-        
-        # 构建Cluster对象
+        db = DBSCAN(eps=CLUSTER_EPS, min_samples=CLUSTER_MIN_POINTS,
+                    algorithm='ball_tree').fit(pts)
+        labels = db.labels_
+
         clusters = []
-        for cid in range(cluster_id):
+        for cid in range(labels.max() + 1):
             mask = labels == cid
             count = np.sum(mask)
-            
+
             if count < CLUSTER_MIN_POINTS or count > CLUSTER_MAX_POINTS:
                 continue
-            
+
             cluster_pts = pts[mask]
             center = cluster_pts.mean(axis=0)
-            
-            # 计算聚类半径 (中心到最远点的距离)
             radius = np.max(np.sqrt(np.sum((cluster_pts - center) ** 2, axis=1)))
-            
+
             cluster = Cluster(
                 points=[PointXY(p[0], p[1]) for p in cluster_pts],
                 center_x=center[0],
                 center_y=center[1],
                 radius=radius,
             )
-            
-            # 判断是否为腿部候选
+
             if LEG_MIN_RADIUS <= radius <= LEG_MAX_RADIUS:
                 cluster.is_leg_candidate = True
-            
+
             clusters.append(cluster)
-        
+
         return clusters
     
     def _detect_persons(self, clusters: List[Cluster],

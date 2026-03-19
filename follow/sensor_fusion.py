@@ -24,13 +24,13 @@ import numpy as np
 from typing import Optional, Tuple, List
 from dataclasses import dataclass
 
-from config import (
+from .config import (
     EKF_PROCESS_NOISE_POS, EKF_PROCESS_NOISE_VEL,
     EKF_MEASUREMENT_NOISE_LIDAR, EKF_MEASUREMENT_NOISE_VISION,
     EKF_MAX_COAST_TIME,
 )
-from lidar_processor import PersonCandidate
-from vision_detector import PersonDetection
+from .lidar_processor import PersonCandidate
+from .vision_detector import PersonDetection
 
 
 @dataclass

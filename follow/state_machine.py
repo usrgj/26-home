@@ -37,13 +37,13 @@ import logging
 from enum import Enum, auto
 from typing import Optional
 
-from config import (
+from .config import (
     TARGET_LOST_TIMEOUT, TARGET_RECOVER_TIMEOUT,
     NAV_GOAL_REACHED_DIST, SEARCH_TIMEOUT,
     FOLLOW_DISTANCE,
 )
-from robot_api import RobotAPI, RobotPose
-from sensor_fusion import TargetState
+from .robot_api import RobotAPI, RobotPose
+from .sensor_fusion import TargetState
 
 logger = logging.getLogger("StateMachine")
 

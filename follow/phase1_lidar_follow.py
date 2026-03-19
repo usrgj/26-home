@@ -29,13 +29,13 @@ import signal
 import sys
 import numpy as np
 
-from config import (
+from .config import (
     ROBOT_MAX_LINEAR_VEL, ROBOT_MAX_ANGULAR_VEL,
     FOLLOW_DISTANCE, MAP_POINTS_NPY_PATH,
     OBSTACLE_DANGER_DIST, ROBOT_RADIUS,
 )
-from robot_api import RobotAPI
-from lidar_processor import LidarProcessor
+from .robot_api import RobotAPI
+from .lidar_processor import LidarProcessor
 
 # =============================================================================
 # 安全限速 (Phase 1 建议保守值)
@@ -154,6 +154,8 @@ def main():
         print("  所有LiDAR点都会被视为动态物体")
         print("  建议先运行: python map_preprocessor.py log.txt ./maps/")
     
+    robot_api.wait_for_data()
+    print(22)
     print("\n请让目标人物站在机器人前方 1~2 米处")
     print("按 Enter 开始跟随 (Ctrl+C 紧急停止)...")
     input()
@@ -162,12 +164,15 @@ def main():
     
     loop_count = 0
     
+    
     while not _shutdown:
         loop_start = time.time()
         loop_count += 1
         
         try:
+            robot_api.get_state()
             # --- 获取位姿 ---
+            print(1)
             pose = robot_api.get_robot_pose()
             
             # --- 获取LiDAR数据并处理 ---
@@ -189,6 +194,7 @@ def main():
             if not candidates:
                 # 没有检测到动态物体
                 robot_api.send_velocity(0.0, 0.0)
+                print("本周期没有检测到动态物体")
                 if loop_count % 20 == 0:
                     print(f"  t={loop_count/20:.1f}s | 未检测到动态物体, 停止")
                 time.sleep(0.05)
@@ -210,8 +216,8 @@ def main():
             robot_api.send_velocity(lv, av)
             
             # --- 日志 ---
-            if loop_count % 10 == 0:  # 每0.5秒打印一次
-                print(f"  t={loop_count*0.05:.1f}s | "
+            if loop_count % 5 == 0:  # 每0.5秒打印一次
+                print(f"  t={loop_count*0.1:.1f}s | "
                       f"候选={len(candidates)} | "
                       f"最近: 距离={dist:.2f}m 方位={angle:.1f}° | "
                       f"指令: v={lv:.2f} ω={av:.2f} | "
@@ -229,9 +235,9 @@ def main():
             except:
                 pass
         
-        # 控制频率 ~20Hz
+        # 控制频率 ~10Hz
         elapsed = time.time() - loop_start
-        sleep_time = 0.05 - elapsed
+        sleep_time = 0.1 - elapsed
         if sleep_time > 0:
             time.sleep(sleep_time)
     

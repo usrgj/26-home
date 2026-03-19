@@ -16,6 +16,7 @@ import json
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple
+from .config import ROBOT_MAX_LINEAR_VEL, ROBOT_MAX_ANGULAR_VEL
 
 
 
@@ -80,7 +81,8 @@ class Obstacle:
 class NavigationResult:
     """导航结果"""
     success: bool = False
-    status: str = ""        # "reached", "planning", "moving", "failed"
+    status: str = ""        # "idle"/"running"/"completed"/"failed"/"canceled"
+    task_type: int = 0        # 导航类型
 
 
 # =============================================================================
@@ -107,6 +109,10 @@ class RobotAPI:
         from camera import camera_manager
         from camera.config import CAMERA_CHEST, CAMERA_HEAD, CAMERA_LEFT, CAMERA_RIGHT
         self._agv = agv_manager
+        
+        
+        
+        self._state: Dict = {}
 
         self.camera_head = camera_manager.get(CAMERA_HEAD)
         self.camera_chest = camera_manager.get(CAMERA_CHEST)
@@ -116,32 +122,54 @@ class RobotAPI:
         
         print("自动跟随初始化")
     
+    def wait_for_data(self, timeout: float = 6.0) -> bool:
+        """
+        切换配置需要时间
+        等待首次推送数据到达。在主循环开始前调用。
+
+        返回: True=数据已到达, False=超时
+        """
+        result = self._agv.query(19301, "2454", data={"interval": 50,
+                                      "included_fields": [
+                                        "x", "y", "angle",]})
+        print(result)
+        time.sleep(3)
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                result = self._agv.poll().response["data"]
+                # debug
+                # for i in range(20):
+                #     print(self._agv.poll().response["data"])
+                #     time.sleep(0.1)
+
+                return
+            except:
+                time.sleep(0.1)
+                print(self._agv.poll())
+                print("err")
+        raise NotImplementedError("等待更新配置后的推送超时")
+
+    def get_state(self):
+        self._state = self._agv.poll().response["data"]
     # =====================================================================
     # 位姿与速度获取
     # =====================================================================
     def get_robot_pose(self) -> RobotPose:
         """
-        [需适配] 获取机器人当前世界坐标系下的位姿。
-        
+        获取机器人当前世界坐标系下的位姿。
+
         返回: RobotPose(x, y, theta, timestamp)
         - x, y: 世界坐标 (m)
         - theta: 朝向角 (rad)
         - timestamp: 秒级时间戳
-        
-        你的API可能返回的是角度制，需要转为弧度制。
-        你的API可能返回的是protobuf消息，需要解析。
         """
-        # ---------------------------------------------------------------
-        # 示例实现 (替换为你的实际代码):
-        # response = self._send_command("GET_POSE")
-        # return RobotPose(
-        #     x=response.x,
-        #     y=response.y,
-        #     theta=math.radians(response.angle),  # 如果API返回角度制
-        #     timestamp=time.time()
-        # )
-        # ---------------------------------------------------------------
-        result = self._agv.query(19204, "03EC")
+        return RobotPose(
+            x=self._state.get("x"),
+            y=self._state.get("y"),
+            theta=self._state.get("angle", 0.0),
+            timestamp=self._state.get("create_on"),
+        )        
 
 
     def get_robot_velocity(self) -> RobotVelocity:
@@ -160,7 +188,7 @@ class RobotAPI:
     # =====================================================================
     def get_lidar_scans(self) -> List[LidarScan]:
         """
-        [需适配] 获取所有LiDAR的最新一帧扫描数据。
+        获取所有LiDAR的最新一帧扫描数据。
         
         返回: 列表，每个元素是一个LidarScan
         
@@ -173,29 +201,37 @@ class RobotAPI:
         
         你需要将原始数据解析并填入 LidarScan 数据结构。
         """
-        # ---------------------------------------------------------------
-        # 示例实现:
-        # raw_data = self._get_point_cloud()  # 调用你的API获取原始点云
-        # scans = []
-        # for laser_data in raw_data:
-        #     scan = LidarScan(
-        #         device_name=laser_data['device_info']['device_name'],
-        #         install_x=laser_data['install_info']['x'],
-        #         install_yaw=laser_data['install_info'].get('yaw', 0.0),
-        #         timestamp=float(laser_data['header']['data_nsec']) * 1e-9,
-        #     )
-        #     for beam_data in laser_data['beams']:
-        #         if beam_data.get('valid', False):
-        #             scan.beams.append(LidarBeam(
-        #                 angle=beam_data.get('angle', 0.0),
-        #                 dist=beam_data['dist'],
-        #                 rssi=beam_data.get('rssi', 0.0),
-        #                 valid=True,
-        #             ))
-        #     scans.append(scan)
-        # return scans
-        # ---------------------------------------------------------------
-        raise NotImplementedError("请实现 get_lidar_scans()，解析你的点云数据")
+        raw_data = self._agv.query(19204, "03F1").response["data"].get("lasers")
+        if raw_data is None:
+            raise NotImplementedError("获取激光雷达为空")
+
+        scans = []
+        for laser_data in raw_data:
+            install_info = laser_data.get('install_info', {})
+            device_info = laser_data.get('device_info', {})
+
+            scan = LidarScan(
+                device_name=device_info.get('device_name', ''),
+                install_x=install_info.get('x', 0.0),
+                install_yaw=install_info.get('yaw', 0.0),
+                timestamp=time.time(),
+            )
+
+            for beam_data in laser_data.get('beams', []):
+                valid = beam_data.get('valid', False)
+                if isinstance(valid, int):
+                    valid = valid != 0
+
+                scan.beams.append(LidarBeam(
+                    angle=beam_data.get('angle', 0.0),
+                    dist=beam_data.get('dist', 0.0),
+                    rssi=beam_data.get('rssi', 0.0),
+                    valid=valid,
+                ))
+
+            scans.append(scan)
+
+        return scans
     
     # =====================================================================
     # 相机数据获取
@@ -237,27 +273,27 @@ class RobotAPI:
     # =====================================================================
     def send_velocity(self, linear_vel: float, angular_vel: float):
         """
-        [需适配] 发送线速度和角速度指令（直接运动控制）。
+        发送线速度和角速度指令（直接运动控制）。
         
         参数:
             linear_vel: 线速度 (m/s)，正值前进，负值后退
             angular_vel: 角速度 (rad/s)，正值左转，负值右转
         
-        注意：差速底盘将 (v, omega) 转化为左右轮速度：
-            v_left  = linear_vel - angular_vel * wheel_base / 2
-            v_right = linear_vel + angular_vel * wheel_base / 2
-        
-        你的API可能接受的是左右轮速度，也可能直接接受 (v, omega)。
-        如果你的API支持发送"平动"和"转动"指令，这里需要做对应的转换。
+          vx = linear_vel    前向速度 (m/s)
+          vy = 0             差速底盘横向为0
+          w  = angular_vel   角速度 (rad/s)，逆时针为正
+          duration = 200     200ms看门狗，程序崩溃后自动停
         """
-        # ---------------------------------------------------------------
-        # 示例实现:
-        # self._send_command("MOVE", {
-        #     "linear_velocity": linear_vel,
-        #     "angular_velocity": angular_vel
-        # })
-        # ---------------------------------------------------------------
-        self._agv.send(19206, "0BEF", )    
+        vx = max(-ROBOT_MAX_LINEAR_VEL, min(ROBOT_MAX_LINEAR_VEL, linear_vel))
+        w = max(-ROBOT_MAX_ANGULAR_VEL, min(ROBOT_MAX_ANGULAR_VEL, angular_vel))
+
+        # self._agv.send(19205, "07DA", data={
+        #     "vx": vx, "vy": 0.0, "w": w, "duration": 0})  
+        result = self._agv.query(19205, "07DA", data={
+            "vx": vx, "vy": 0.0, "w": w, "duration": 0})
+        print(f'vx:{vx}, w:{w}')  
+
+
     def send_arc_motion(self, linear_vel: float, radius: float):
         """
         [需适配] 发送圆弧运动指令。

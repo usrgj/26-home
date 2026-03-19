@@ -29,13 +29,13 @@ import logging
 import numpy as np
 from typing import Optional
 
-from config import MAIN_LOOP_RATE, LOG_LEVEL, MAP_POINTS_NPY_PATH
-from robot_api import RobotAPI
-from lidar_processor import LidarProcessor
-from vision_detector import VisionDetector
-from sensor_fusion import SensorFusion, TargetState
-from motion_controller import MotionController
-from state_machine import StateMachine, FollowState
+from .config import MAIN_LOOP_RATE, LOG_LEVEL, MAP_POINTS_NPY_PATH
+from .robot_api import RobotAPI
+from .lidar_processor import LidarProcessor
+from .vision_detector import VisionDetector
+from .sensor_fusion import SensorFusion, TargetState
+from .motion_controller import MotionController
+from .state_machine import StateMachine, FollowState
 
 
 # =============================================================================

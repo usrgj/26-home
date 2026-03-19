@@ -28,10 +28,11 @@ if __name__ == "__main__":
         # info = result.response["data"]
         # print(info.get('slam_status'))
         
-        # result = mgr.query(19204, "03F1")
-        # info = result.response["data"]
-        # print(info.get('lasers'))
-        # time.sleep(4)
+        # 获取激光雷达数据
+        result = mgr.query(19204, "03F1")
+        info = result.response["data"]
+        print(info.get('lasers'))
+        time.sleep(4)
         
         # mgr.send(19210, "17D5")
 
@@ -59,18 +60,47 @@ if __name__ == "__main__":
         # info = result.response["data"]
 
         # 开环运动控制
-        # result = mgr.query(PORT_CONTROL, "07DA", data={"vx": 0.5, "vy": 0.0, "w": 0.0, "duration": 0})
-        # print(result.response["data"]["err_msg"])
-        # time.sleep(5)
+        # result = mgr.query(PORT_CONTROL, "07DA", data={"vx": -0.2, "vy": 0.0, "w": 0.0, "duration": 0})
+        # print(result.response)
+        # time.sleep(2)
+        # vx = 0.0
+        # w = 0.0
 
-        # 机器人主动推送
-        mgr.send(19301, "9300", data={"interval": 200, "included_fields": [
-            "x",
-            "y",
-            "create_on"
-        ]})
-        time.sleep(2)
-        print(mgr.poll())
+        # # 测试高频接受运动指令
+        # for i in range(20):
+
+        #     result = mgr.query(PORT_CONTROL, "07DA", data={"vx": vx, "vy": 0.0, "w": w, "duration": 0})
+        #     print(result.response)
+        #     vx+=1/10
+        #     w+=1/10
+        #     time.sleep(0.5)
+
+        # 机器人主动推送 修改推送配置需要等待几秒
+        
+        
+        # time.sleep(2)
+
+        # print(mgr.poll().response["data"])
+        # for i in range(5):
+        #     print(mgr.poll().response["data"])
+        #     time.sleep(0.3)
+        
+        # result = mgr.query(19301,"2454", data={"interval": 50,
+        #                               "included_fields": [
+        #                                 "x", "y", "angle",
+        #                                  ]})
+        # print(result)
+
+        # time.sleep(3)
+        # for i in range(10):
+        #     print(mgr.poll().response["data"])
+        #     time.sleep(0.1)
+
+        #获取指定地图的json数据
+        # result = mgr.query(PORT_CONFIGUE, "0FAB", data={"map_name":"3_15"})
+        # print(result.response["data"])
+
+        # None
 
     
     # mgr = agv_manager

@@ -48,7 +48,22 @@ PORT_CONFIG: dict[int, AGVConfig] = {
 }
 
 # AGV 主动推送的 cmd_id（收到后放入 push_queue）
-PUSH_CMD_IDS = ("4B65")  
+PUSH_CMD_IDS = ["4B65"]
+
+# 推送订阅配置：连接后自动发送订阅请求，AGV 才会开始推送数据
+# 参考 rec.py 中的订阅帧（cmd_id=2454，即十进制 9300）
+PUSH_SUBSCRIBE = {
+    19301: {
+        "cmd_id": "2454",
+        "data": {
+            "interval": 500,
+            "included_fields": [
+                "x", "y", "angle",
+                 
+            ]
+        }
+    }
+}
 
 
 # ── 消息类型 ──────────────────────────────────────────────────────────────
@@ -172,6 +187,11 @@ class AGVClientThread:
                 client.connect()
                 for cmd_id in PUSH_CMD_IDS:
                     client.on(cmd_id, self._make_push_callback(port))
+                # 发送推送订阅请求（如端口19301需要先订阅才能收到推送）
+                if port in PUSH_SUBSCRIBE:
+                    sub = PUSH_SUBSCRIBE[port]
+                    client.send(sub["cmd_id"], sub["data"])
+                    print(f"[客户端线程] 端口 {port} 已发送推送订阅请求")
                 with lock:
                     self._clients[port] = client
                 print(f"[客户端线程] 端口 {port} 连接成功")

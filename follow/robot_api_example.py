@@ -41,7 +41,7 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple
 
-from config import ROBOT_MAX_LINEAR_VEL, ROBOT_MAX_ANGULAR_VEL
+from .config import ROBOT_MAX_LINEAR_VEL, ROBOT_MAX_ANGULAR_VEL
 
 logger = logging.getLogger("RobotAPI")
 
@@ -104,7 +104,7 @@ class NavigationResult:
     success: bool = False
     status: str = ""          # "idle"/"running"/"completed"/"failed"/"canceled"
     target_dist: float = 0.0  # 剩余路径长度 (m)
-    task_type: int = 0        # 导航类型
+    
 
 
 # =============================================================================
@@ -368,10 +368,7 @@ class RobotAPI:
         发送开环速度指令。
 
         对应你的API字段:
-          vx = linear_vel    前向速度 (m/s)
-          vy = 0             差速底盘横向为0
-          w  = angular_vel   角速度 (rad/s)，逆时针为正
-          duration = 200     200ms看门狗，程序崩溃后自动停
+          
 
         ★ 首次调用前需要先 acquire_control() 获取开环控制权，
           否则会报 "control is preempted" (ret_code: 40020)

@@ -19,7 +19,7 @@ import time
 import numpy as np
 from typing import Optional, Tuple
 
-from config import (
+from .config import (
     ROBOT_MAX_LINEAR_VEL, ROBOT_MAX_ANGULAR_VEL, ROBOT_RADIUS,
     FOLLOW_DISTANCE, FOLLOW_DISTANCE_TOLERANCE, FOLLOW_ANGLE_TOLERANCE,
     PID_LINEAR_KP, PID_LINEAR_KI, PID_LINEAR_KD,
@@ -27,8 +27,8 @@ from config import (
     OBSTACLE_DANGER_DIST, OBSTACLE_SLOW_DIST, OBSTACLE_AVOID_DIST,
     VFH_SECTOR_ANGLE, VFH_THRESHOLD, LIDAR_MAX_RANGE,
 )
-from robot_api import RobotAPI, RobotPose
-from sensor_fusion import TargetState
+from .robot_api import RobotAPI, RobotPose
+from .sensor_fusion import TargetState
 
 
 class PIDController:

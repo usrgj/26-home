@@ -25,15 +25,15 @@ from typing import List, Optional, Tuple
 from dataclasses import dataclass
 
 # 导入我们的模块
-from config import *
-from robot_api import (
+from .config import *
+from .robot_api import (
     RobotAPI, RobotPose, RobotVelocity, LidarScan, LidarBeam,
     CameraFrame, NavigationResult, Obstacle
 )
-from lidar_processor import LidarProcessor, PersonCandidate
-from sensor_fusion import SensorFusion
-from motion_controller import MotionController
-from state_machine import StateMachine, FollowState
+from .lidar_processor import LidarProcessor, PersonCandidate
+from .sensor_fusion import SensorFusion
+from .motion_controller import MotionController
+from .state_machine import StateMachine, FollowState
 
 
 # =============================================================================

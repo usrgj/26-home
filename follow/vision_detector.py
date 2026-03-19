@@ -19,12 +19,12 @@ import numpy as np
 from typing import List, Optional, Tuple
 from dataclasses import dataclass, field
 
-from config import (
+from .config import (
     CAMERAS, PRIMARY_CAMERAS,
     DETECTION_CONFIDENCE_THRESHOLD, REID_SIMILARITY_THRESHOLD,
     REID_FEATURE_DIM,
 )
-from robot_api import RobotAPI, CameraFrame, RobotPose
+from .robot_api import RobotAPI, CameraFrame, RobotPose
 
 
 @dataclass
