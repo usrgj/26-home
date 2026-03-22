@@ -21,6 +21,7 @@ from typing import Optional, Tuple
 
 from .config import (
     ROBOT_MAX_LINEAR_VEL, ROBOT_MAX_ANGULAR_VEL, ROBOT_RADIUS,
+    MAX_LINEAR_ACCEL, MAX_ANGULAR_ACCEL, MAIN_LOOP_RATE,
     FOLLOW_DISTANCE, FOLLOW_DISTANCE_TOLERANCE, FOLLOW_ANGLE_TOLERANCE,
     PID_LINEAR_KP, PID_LINEAR_KI, PID_LINEAR_KD,
     PID_ANGULAR_KP, PID_ANGULAR_KI, PID_ANGULAR_KD,
@@ -98,26 +99,30 @@ class MotionController:
     
     def __init__(self, robot_api: RobotAPI):
         self._robot_api = robot_api
-        
+
         # PID控制器: 线速度 (控制跟随距离)
         self._linear_pid = PIDController(
             kp=PID_LINEAR_KP, ki=PID_LINEAR_KI, kd=PID_LINEAR_KD,
             output_min=-ROBOT_MAX_LINEAR_VEL,
             output_max=ROBOT_MAX_LINEAR_VEL,
         )
-        
+
         # PID控制器: 角速度 (控制朝向)
         self._angular_pid = PIDController(
             kp=PID_ANGULAR_KP, ki=PID_ANGULAR_KI, kd=PID_ANGULAR_KD,
             output_min=-ROBOT_MAX_ANGULAR_VEL,
             output_max=ROBOT_MAX_ANGULAR_VEL,
         )
+
+        # 上一帧速度（用于斜坡限制）
+        self._last_linear_vel = 0.0
+        self._last_angular_vel = 0.0
     
     # =====================================================================
     # 主控制接口
     # =====================================================================
-    def follow_target(self, target: TargetState, robot_pose: RobotPose,
-                      obstacle_sectors: np.ndarray) -> Tuple[float, float]:
+    def compute_velocity(self, target: TargetState, robot_pose: RobotPose,
+                         obstacle_sectors: np.ndarray) -> Tuple[float, float]:
         """
         计算跟随目标所需的运动指令。
         
@@ -171,31 +176,59 @@ class MotionController:
         # --- Step 5: PID计算线速度 ---
         # 距离误差 = 当前距离 - 期望跟随距离 (正值表示太远，需要前进)
         dist_error = dist_to_target - FOLLOW_DISTANCE
-        linear_vel = self._linear_pid.compute(dist_error, now)
-        
+
+        # 距离死区：误差在容差范围内时不动
+        if abs(dist_error) < FOLLOW_DISTANCE_TOLERANCE:
+            linear_vel = 0.0
+        else:
+            linear_vel = self._linear_pid.compute(dist_error, now)
+
         # 如果目标在后方 (|angle_error| > 90°)，先转身再前进
         if abs(angle_error) > math.pi / 2:
             linear_vel = 0.0  # 先不前进，只转身
-        
+
         # 距离太近时后退
         if dist_to_target < FOLLOW_DISTANCE - FOLLOW_DISTANCE_TOLERANCE:
             linear_vel = min(linear_vel, -0.1)
-        
+
         # 应用速度因子 (根据障碍物距离减速)
         linear_vel *= speed_factor
-        
+
         # 限幅
         linear_vel = np.clip(linear_vel, -ROBOT_MAX_LINEAR_VEL, ROBOT_MAX_LINEAR_VEL)
-        
+
         # --- Step 6: PID计算角速度 ---
-        angular_vel = self._angular_pid.compute(safe_angle, now)
+        # 角度死区：角度偏差在容差范围内时不转
+        if abs(safe_angle) < FOLLOW_ANGLE_TOLERANCE:
+            angular_vel = 0.0
+        else:
+            angular_vel = self._angular_pid.compute(safe_angle, now)
         angular_vel = np.clip(angular_vel, -ROBOT_MAX_ANGULAR_VEL, ROBOT_MAX_ANGULAR_VEL)
         
         # --- Step 7: 高角速度时降低线速度 (差速底盘稳定性) ---
         angular_ratio = abs(angular_vel) / ROBOT_MAX_ANGULAR_VEL
         if angular_ratio > 0.5:
             linear_vel *= (1.0 - 0.5 * angular_ratio)
-        
+
+        # --- Step 8: 斜坡限制 (slew rate limiter) ---
+        # 限制相邻周期速度变化量，使运动更平滑
+        max_linear_delta = MAX_LINEAR_ACCEL / MAIN_LOOP_RATE
+        max_angular_delta = MAX_ANGULAR_ACCEL / MAIN_LOOP_RATE
+
+        linear_vel = np.clip(
+            linear_vel,
+            self._last_linear_vel - max_linear_delta,
+            self._last_linear_vel + max_linear_delta,
+        )
+        angular_vel = np.clip(
+            angular_vel,
+            self._last_angular_vel - max_angular_delta,
+            self._last_angular_vel + max_angular_delta,
+        )
+
+        self._last_linear_vel = linear_vel
+        self._last_angular_vel = angular_vel
+
         return linear_vel, angular_vel
     
     def rotate_search(self, direction: float = 1.0) -> Tuple[float, float]:
@@ -208,7 +241,7 @@ class MotionController:
         返回:
             (linear_vel, angular_vel) — 原地旋转指令
         """
-        from config import SEARCH_ROTATION_SPEED
+        from .config import SEARCH_ROTATION_SPEED
         return 0.0, direction * SEARCH_ROTATION_SPEED
     
     def stop(self):
@@ -216,6 +249,8 @@ class MotionController:
         self._robot_api.stop()
         self._linear_pid.reset()
         self._angular_pid.reset()
+        self._last_linear_vel = 0.0
+        self._last_angular_vel = 0.0
     
     # =====================================================================
     # VFH 向量场直方图避障

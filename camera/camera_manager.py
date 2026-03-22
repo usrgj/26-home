@@ -1,7 +1,19 @@
 # camera_manager.py
 import pyrealsense2 as rs
 import numpy as np
+import time
 from typing import Optional
+
+
+def _hardware_reset(serial: str) -> None:
+    """启动前 reset 相机，清除残留状态"""
+    ctx = rs.context()
+    for dev in ctx.devices:
+        if dev.get_info(rs.camera_info.serial_number) == serial:
+            dev.hardware_reset()
+            time.sleep(3)  # 等待设备重新枚举
+            return
+    raise RuntimeError(f"未找到相机 {serial}")
 
 
 class RealSenseCamera:
@@ -13,15 +25,20 @@ class RealSenseCamera:
         self.config = rs.config()
         self.align = None
         self.started = False
+        self.intrinsics = None  # rs.intrinsics: fx, fy, ppx, ppy
 
     def start(self, width=640, height=480, fps=30):
         if self.started:
             return
+        _hardware_reset(self.serial)
         self.config.enable_device(self.serial)
         self.config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
         self.config.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
-        self.pipeline.start(self.config)
+        profile = self.pipeline.start(self.config)
         self.align = rs.align(rs.stream.color)
+        # 获取彩色流的内参（对齐后深度流共享同一内参）
+        color_stream = profile.get_stream(rs.stream.color).as_video_stream_profile()
+        self.intrinsics = color_stream.get_intrinsics()
         self.started = True
 
     def get_frames(self):

@@ -29,23 +29,32 @@ if __name__ == "__main__":
         # print(info.get('slam_status'))
         
         # 获取激光雷达数据
-        result = mgr.query(19204, "03F1")
-        info = result.response["data"]
-        print(info.get('lasers'))
-        time.sleep(4)
+        # result = mgr.query(19204, "03F1")
+        # info = result.response["data"]
+        # print(info.get('lasers'))
+        # time.sleep(4)
         
         # mgr.send(19210, "17D5")
 
         #自由导航测试
-        # result = mgr.query(19206, "0BEB", data={
-        #                                 "freeGo": {
-        #                                     "theta": 1.0, # 弧度
-        #                                     "x": 2.052,
-        #                                     "y": 4.740
-        #                                 },
-        #                                 "id": "SELF_POSITION"
-        #                                 })
-        # print(result.response["data"])
+        result = mgr.query(19206, "0BEB", data={
+                                        "freeGo": {
+                                            "theta": 3.140, # 弧度
+                                            "x": -5.052,
+                                            "y": 1.740
+                                        },
+                                        "id": "SELF_POSITION"
+                                        })
+        if result.response["data"].get("ret_code") == 0:
+            print("发送成功")
+
+        # 查询导航状态
+        time.sleep(5)
+        for i in range(30) :
+            result = mgr.query(19204, "03FC", data={"simple": True})
+            task_code = result.response["data"].get("task_status")
+            print(task_code)
+            time.sleep(0.2)
 
         
         # 获取区域id

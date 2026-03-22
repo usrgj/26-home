@@ -2,7 +2,6 @@
 =============================================================================
 robot_api.py — 机器人硬件抽象层
 =============================================================================
-★★★ 这是你需要重点适配的文件 ★★★
 
 本文件封装了所有与机器人硬件交互的接口。你需要将每个方法的实现
 替换为你自己机器人SDK/API的实际调用。
@@ -67,6 +66,10 @@ class CameraFrame:
     depth_image: Optional[np.ndarray] = None    # 深度图 (H, W)，单位 mm
     camera_name: str = ""
     timestamp: float = 0.0
+    fx: float = 0.0     # 焦距 x (像素)
+    fy: float = 0.0     # 焦距 y (像素)
+    ppx: float = 0.0    # 主点 x (像素)
+    ppy: float = 0.0    # 主点 y (像素)
 
 
 @dataclass
@@ -82,9 +85,17 @@ class NavigationResult:
     """导航结果"""
     success: bool = False
     status: str = ""        # "idle"/"running"/"completed"/"failed"/"canceled"
-    task_type: int = 0        # 导航类型
+    # task_type: int = 0        # 导航类型
 
-
+state_map  = {
+                0: None,
+                1: "WAITING",
+                2: "RUNNING", 
+                3: "SUSPENDED",
+                4: "COMPLETED",
+                5: "FAILED",
+                6: "CANCELED",
+                }
 # =============================================================================
 # 机器人API类
 # =============================================================================
@@ -92,7 +103,7 @@ class RobotAPI:
     """
     机器人硬件交互的统一接口。
     
-    ★★★ [需适配] ★★★
+    ★★★ TODO★★★
     你需要将这个类中的每个方法替换为你自己机器人的实际API调用。
     例如：
     - 如果你的机器人通过HTTP REST API通信，这里用requests库调用
@@ -102,22 +113,21 @@ class RobotAPI:
     
     def __init__(self):
         """
-        [需适配] 初始化与机器人的连接。
+        TODO初始化与机器人的连接。
         例如：建立TCP连接、初始化SDK、连接相机等。
         """
         from agv_api import agv_manager
         from camera import camera_manager
-        from camera.config import CAMERA_CHEST, CAMERA_HEAD, CAMERA_LEFT, CAMERA_RIGHT
+        from camera.config import CAMERA_CHEST, CAMERA_HEAD
         self._agv = agv_manager
         
-        
-        
         self._state: Dict = {}
+        # 切换推送配置
+        self.wait_for_data()
 
         self.camera_head = camera_manager.get(CAMERA_HEAD)
         self.camera_chest = camera_manager.get(CAMERA_CHEST)
-        self.camera_left = camera_manager.get(CAMERA_LEFT)
-        self.camera_right = camera_manager.get(CAMERA_RIGHT)
+
 
         
         print("自动跟随初始化")
@@ -131,7 +141,16 @@ class RobotAPI:
         """
         result = self._agv.query(19301, "2454", data={"interval": 50,
                                       "included_fields": [
-                                        "x", "y", "angle",]})
+                                        "x",
+                                        "y", 
+                                        "angle",
+                                        "task_status",
+                                        "vx",
+                                        "w",
+                                        "create_on",
+                                        "block_x",
+                                        "block_y"
+                                        ]})
         print(result)
         time.sleep(3)
         start = time.time()
@@ -148,7 +167,7 @@ class RobotAPI:
                 time.sleep(0.1)
                 print(self._agv.poll())
                 print("err")
-        raise NotImplementedError("等待更新配置后的推送超时")
+        print("ERROR: 等待更新配置后的推送超时!!!")
 
     def get_state(self):
         self._state = self._agv.poll().response["data"]
@@ -171,10 +190,10 @@ class RobotAPI:
             timestamp=self._state.get("create_on"),
         )        
 
-
+    '''
     def get_robot_velocity(self) -> RobotVelocity:
         """
-        [需适配] 获取机器人在机器人坐标系下的速度。
+        TODO获取机器人在机器人坐标系下的速度。
         
         返回: RobotVelocity(vx, vy, omega, timestamp)
         - vx: 前向速度 (m/s)
@@ -182,7 +201,7 @@ class RobotAPI:
         - omega: 角速度 (rad/s)
         """
         raise NotImplementedError("请实现 get_robot_velocity()")
-    
+    '''
     # =====================================================================
     # LiDAR数据获取
     # =====================================================================
@@ -238,35 +257,39 @@ class RobotAPI:
     # =====================================================================
     def get_camera_frame(self, camera_name: str) -> CameraFrame:
         """
-        [需适配] 获取指定相机的最新一帧彩色图+深度图。
-        
+        获取指定相机的最新一帧彩色图+深度图。
+
         参数:
-            camera_name: 相机名称 ("head", "chest", "left_arm", "right_arm")
-        
+            camera_name: 相机名称 ("head", "chest")
+
         返回: CameraFrame
             - color_image: numpy数组 (H, W, 3)，BGR格式
             - depth_image: numpy数组 (H, W)，单位毫米 (uint16)
-        
-        如果你用的是Intel RealSense，可以用pyrealsense2库:
         """
-        # ---------------------------------------------------------------
-        # 示例实现 (Intel RealSense):
-        # pipeline = self._pipelines[camera_name]
-        # frames = pipeline.wait_for_frames()
-        # color_frame = frames.get_color_frame()
-        # depth_frame = frames.get_depth_frame()
-        # 
-        # color_image = np.asanyarray(color_frame.get_data())
-        # depth_image = np.asanyarray(depth_frame.get_data())
-        # 
-        # return CameraFrame(
-        #     color_image=color_image,
-        #     depth_image=depth_image,
-        #     camera_name=camera_name,
-        #     timestamp=time.time(),
-        # )
-        # ---------------------------------------------------------------
-        raise NotImplementedError(f"请实现 get_camera_frame('{camera_name}')")
+        camera_map = {
+            "head": self.camera_head,
+            "chest": self.camera_chest,
+        }
+        cam = camera_map.get(camera_name)
+        if cam is None:
+            raise ValueError(f"未知相机名称: {camera_name}")
+
+        if not cam.started:
+            cam.start()
+
+        color_image, depth_image = cam.get_frames()
+        intr = cam.intrinsics
+        return CameraFrame(
+            color_image=color_image,
+            depth_image=depth_image,
+            camera_name=camera_name,
+            timestamp=time.time(),
+            fx=intr.fx if intr else 0.0,
+            fy=intr.fy if intr else 0.0,
+            ppx=intr.ppx if intr else 0.0,
+            ppy=intr.ppy if intr else 0.0,
+        )
+
     
     # =====================================================================
     # 运动控制指令
@@ -287,16 +310,14 @@ class RobotAPI:
         vx = max(-ROBOT_MAX_LINEAR_VEL, min(ROBOT_MAX_LINEAR_VEL, linear_vel))
         w = max(-ROBOT_MAX_ANGULAR_VEL, min(ROBOT_MAX_ANGULAR_VEL, angular_vel))
 
-        # self._agv.send(19205, "07DA", data={
-        #     "vx": vx, "vy": 0.0, "w": w, "duration": 0})  
         result = self._agv.query(19205, "07DA", data={
-            "vx": vx, "vy": 0.0, "w": w, "duration": 0})
+            "vx": vx, "vy": 0.0, "w": w, "duration": 200})
         print(f'vx:{vx}, w:{w}')  
 
 
     def send_arc_motion(self, linear_vel: float, radius: float):
         """
-        [需适配] 发送圆弧运动指令。
+        发送圆弧运动指令。
         
         参数:
             linear_vel: 线速度 (m/s)
@@ -312,7 +333,7 @@ class RobotAPI:
         self.send_velocity(linear_vel, angular_vel)
     
     def stop(self):
-        """[需适配] 紧急停止，发送零速度。"""
+        """紧急停止，发送零速度。"""
         self.send_velocity(0.0, 0.0)
     
     # =====================================================================
@@ -320,7 +341,8 @@ class RobotAPI:
     # =====================================================================
     def navigate_to(self, x: float, y: float, theta: float) -> bool:
         """
-        [需适配] 发送导航目标点，让机器人自主导航到指定世界坐标。
+        TODO
+        发送导航目标点，让机器人自主导航到指定世界坐标。
         
         参数:
             x, y: 目标世界坐标 (m)
@@ -332,48 +354,52 @@ class RobotAPI:
         这个接口是非阻塞的，发送导航目标后立即返回。
         用 get_navigation_status() 查询导航状态。
         """
-        # ---------------------------------------------------------------
-        # 示例实现:
-        # angle_deg = math.degrees(theta)
-        # result = self._send_command("NAVIGATE", {
-        #     "x": x, "y": y, "angle": angle_deg
-        # })
-        # return result.get("success", False)
-        # ---------------------------------------------------------------
-        raise NotImplementedError("请实现 navigate_to()")
+        result = self._agv.query(19206, "0BEB", data={
+            "freeGo":{
+                "theta": theta,
+                "x": x,
+                "y": y
+            },
+            "id":"SELF_POSITION"
+            }
+        )
+
+        if result.response["data"].get("ret_code") != 0:
+            return False
+        return True
     
     def get_navigation_status(self) -> NavigationResult:
         """
-        [需适配] 查询当前导航任务的状态。
+        查询当前导航任务的状态。
         
         返回: NavigationResult
             - success: 是否到达
-            - status: "idle" / "planning" / "moving" / "reached" / "failed"
+            - status: 
         """
-        raise NotImplementedError("请实现 get_navigation_status()")
+        sucess = True
+        task_code = self._state.get("task_status")
+        if task_code != 4:
+            sucess = False
+        
+        return NavigationResult(success=sucess, 
+                                status=state_map.get(task_code))
+        
     
     def cancel_navigation(self):
         """
-        [需适配] 取消当前导航任务。
+        取消当前导航任务。
         当需要从导航模式切回直接控制模式时调用。
         """
-        # ---------------------------------------------------------------
-        # 示例: self._send_command("CANCEL_NAV")
-        # ---------------------------------------------------------------
-        raise NotImplementedError("请实现 cancel_navigation()")
+        self._agv.send(19206, "0BBB")
     
     # =====================================================================
     # 地图接口
     # =====================================================================
     def get_global_map(self) -> Optional[Dict]:
         """
-        [需适配] 获取protobuf格式的2D全局地图并转为字典。
-        
-        返回: 解析后的地图字典，格式取决于你的地图protobuf定义。
-        
-        你提到可以"获取protobuf格式的2D全局地图并转为json进行解析"，
-        这里需要你实现具体的获取和解析逻辑。
-        
+        TODO
+        获取protobuf格式的2D全局地图并转为字典。
+
         地图数据通常包含:
         - origin: 地图原点在世界坐标系中的位置
         - resolution: 分辨率 (m/pixel)
@@ -392,16 +418,21 @@ class RobotAPI:
         # return map_dict
         # ---------------------------------------------------------------
         raise NotImplementedError("请实现 get_global_map()")
-    
+
+    '''
     def get_nearest_obstacle(self) -> Optional[Obstacle]:
         """
-        [需适配] 获取最近障碍物的世界坐标。
-        
-        你提到"能获取最近的障碍物的世界坐标（不能指定获取动态障碍物的坐标）"。
-        这个接口返回地图上标记的最近障碍物，可能不包括动态障碍物。
+        TODO
+        获取最近障碍物的世界坐标。
+
         """
-        raise NotImplementedError("请实现 get_nearest_obstacle()")
-    
+        return Obstacle(
+            x=self._state.get("block_x"),
+            y=self._state.get("block_y"),
+
+        )
+        '''
+
     # =====================================================================
     # 工具方法
     # =====================================================================
@@ -438,11 +469,12 @@ class RobotAPI:
         local_y = -dx * sin_t + dy * cos_t
         return local_x, local_y
     
-    def disconnect(self):
-        """[需适配] 断开与机器人的连接，释放资源。"""
-        # ---------------------------------------------------------------
-        # for pipeline in self._pipelines.values():
-        #     pipeline.stop()
-        # self._socket.close()
-        # ---------------------------------------------------------------
-        print("[RobotAPI] 已断开连接")
+    def release(self):
+        '''
+        关闭机器人推送
+        '''
+        self._agv.query(19301, "2454", data={"interval": 9990,
+                                "included_fields": [
+                                "create_on",                                
+                                ]})
+        

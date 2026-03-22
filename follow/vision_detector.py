@@ -8,7 +8,7 @@ vision_detector.py — 视觉检测与ReID模块
 3. 将检测结果转换到机器人坐标系/世界坐标系
 4. 维护目标人物的外观特征 (ReID)，用于区分跟随对象和其他人
 
-★★★ [需适配] ★★★
+★★★
 你需要根据你实际使用的检测模型来修改检测部分。
 本文件提供基于 ultralytics YOLO 的参考实现。
 如果你使用其他检测器（如MediaPipe、OpenPose等），替换相应部分即可。
@@ -60,7 +60,7 @@ class VisionDetector:
         """
         初始化检测模型。
         
-        [需适配] 根据你使用的检测框架修改。
+        TODO 根据你使用的检测框架修改。
         """
         self._model = None
         self._reid_model = None
@@ -68,34 +68,15 @@ class VisionDetector:
         # 跟随目标的外观特征模板 (在 lock_target 时设置)
         self._target_feature: Optional[np.ndarray] = None
         
-        # ------------------------------------------------------------------
-        # 方式A: 使用 ultralytics YOLOv8 (推荐，简单好用)
-        # pip install ultralytics
-        # 
-        # from ultralytics import YOLO
-        # self._model = YOLO("yolov8n.pt")  # nano版本，速度快
-        #                                    # 也可用 yolov8s.pt 精度更高
-        # ------------------------------------------------------------------
+        from ultralytics import YOLO
+        self._model = YOLO("yolov8s.pt")  
         
-        # ------------------------------------------------------------------
-        # 方式B: 使用 ONNX Runtime 运行导出的YOLO模型
-        # 适用于没有GPU的边缘设备
-        #
-        # import onnxruntime as ort
-        # self._session = ort.InferenceSession("yolov8n.onnx")
-        # ------------------------------------------------------------------
-        
-        # ------------------------------------------------------------------
-        # ReID模型 (可选，用于多人场景下区分目标)
-        # 
+        # ReID模型 (可选，用于多人场景下区分目标) 使用onnet时需要在这里加载模型
+        # self._reid_model = 
         # 简单方案: 不用深度学习ReID，直接用颜色直方图作为特征
         # 复杂方案: 用 torchreid 或 OSNet 等轻量级ReID模型
-        #
-        # 本实现默认使用颜色直方图方案 (无需额外模型)
-        # ------------------------------------------------------------------
         
         print("[VisionDetector] 初始化完成")
-        print("  [需适配] 请确保已安装检测模型 (YOLO等)")
     
     # =====================================================================
     # 核心检测流程
@@ -105,7 +86,7 @@ class VisionDetector:
         """
         从所有相机中检测人物。
         
-        按优先级遍历相机 (头部 → 胸部 → 左臂 → 右臂)，
+        按优先级遍历相机 (头部 → 胸部)，
         合并所有检测结果，去重，返回统一列表。
         
         参数:
@@ -186,33 +167,12 @@ class VisionDetector:
         """
         在单个相机帧中检测人物。
         
-        [需适配] 这里是实际调用检测模型的地方。
+         这里是实际调用检测模型的地方。
         """
         detections = []
         cam_config = CAMERAS[camera_name]
         timestamp = time.time()
         
-        # ---------------------------------------------------------------
-        # [需适配] 调用你的检测模型
-        # 
-        # 示例 (ultralytics YOLO):
-        # results = self._model(frame.color_image, verbose=False)
-        # for result in results:
-        #     boxes = result.boxes
-        #     for box in boxes:
-        #         cls = int(box.cls[0])
-        #         if cls != 0:       # 0 = person in COCO
-        #             continue
-        #         conf = float(box.conf[0])
-        #         if conf < DETECTION_CONFIDENCE_THRESHOLD:
-        #             continue
-        #         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
-        #         
-        #         # ... 后续处理见下方 ...
-        # ---------------------------------------------------------------
-        
-        # 以下是处理逻辑的框架（检测结果由上面的模型提供）:
-        # 假设 bboxes 是检测到的人物边界框列表: [(x1,y1,x2,y2,conf), ...]
         bboxes = self._run_detector(frame.color_image)
         
         for (x1, y1, x2, y2, conf) in bboxes:
@@ -226,27 +186,35 @@ class VisionDetector:
             cx_pixel = (x1 + x2) / 2.0
             cy_pixel = (y1 + y2) / 2.0
             
-            # 像素坐标 → 相机坐标系
-            # [需适配] 这里使用简化的针孔模型，你需要用实际的相机内参
-            img_w = cam_config["image_width"]
-            img_h = cam_config["image_height"]
-            hfov_rad = math.radians(cam_config["hfov"])
-            fx = img_w / (2.0 * math.tan(hfov_rad / 2.0))  # 近似焦距
-            
+            # 像素坐标 → 相机坐标系（使用 RealSense 提供的真实内参）
+            fx = frame.fx
+            fy = frame.fy
+            ppx = frame.ppx
+            ppy = frame.ppy
+
             # 相机坐标系: Z朝前, X朝右, Y朝下 (标准相机坐标系)
             cam_z = depth_m  # 前方距离
-            cam_x = (cx_pixel - img_w / 2.0) * depth_m / fx  # 水平偏移
+            cam_x = (cx_pixel - ppx) * depth_m / fx  # 水平偏移
+            cam_y = (cy_pixel - ppy) * depth_m / fy  # 垂直偏移 (向下为正)
             
             # --- 相机坐标系 → 机器人坐标系 ---
-            # 考虑相机的安装位置和朝向
+            # 相机坐标系: X右, Y下, Z前
+            # 机器人坐标系: X前, Y左
             cam_yaw_rad = math.radians(cam_config["yaw"])
-            
-            # 旋转 (相机坐标 → 机器人坐标)
-            # 机器人坐标系: X朝前, Y朝左
-            robot_x = cam_config["x"] + cam_z * math.cos(cam_yaw_rad) - cam_x * math.sin(cam_yaw_rad)
-            robot_y = cam_z * math.sin(cam_yaw_rad) + cam_x * math.cos(cam_yaw_rad)
-            # 注意：这里简化了，实际中还需考虑pitch和相机Y偏移
-            # [需适配] 如果你的相机有复杂的安装姿态，需要完整的旋转矩阵
+            cam_pitch_rad = math.radians(cam_config["pitch"])
+
+            # 1. pitch 旋转 (绕相机水平轴): 修正前方距离的垂直投影
+            cos_p = math.cos(cam_pitch_rad)
+            sin_p = math.sin(cam_pitch_rad)
+            cam_z_rot = cam_z * cos_p + cam_y * sin_p
+
+            # 2. yaw 旋转 + 平移
+            #    cam_z_rot (相机前方) → robot_x 分量
+            #    cam_x (相机右方) → -robot_y 分量 (机器人Y轴朝左)
+            cos_y = math.cos(cam_yaw_rad)
+            sin_y = math.sin(cam_yaw_rad)
+            robot_x = cam_config["x"] + cam_z_rot * cos_y + cam_x * sin_y
+            robot_y = cam_config["y"] + cam_z_rot * sin_y - cam_x * cos_y
             
             # --- 机器人坐标系 → 世界坐标系 ---
             cos_t = math.cos(robot_pose.theta)
@@ -276,35 +244,27 @@ class VisionDetector:
     def _run_detector(self, color_image: np.ndarray
                       ) -> List[Tuple[int, int, int, int, float]]:
         """
-        [需适配] 运行人物检测模型。
+        运行人物检测模型。
         
         参数:
             color_image: BGR图像 (H, W, 3)
         
         返回:
             检测框列表: [(x1, y1, x2, y2, confidence), ...]
-        
-        请替换为你实际使用的检测器。
         """
-        # ---------------------------------------------------------------
-        # ultralytics YOLO 示例:
-        # results = self._model(color_image, verbose=False)
-        # bboxes = []
-        # for result in results:
-        #     for box in result.boxes:
-        #         cls = int(box.cls[0])
-        #         if cls != 0:  # COCO person class
-        #             continue
-        #         conf = float(box.conf[0])
-        #         if conf < DETECTION_CONFIDENCE_THRESHOLD:
-        #             continue
-        #         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
-        #         bboxes.append((x1, y1, x2, y2, conf))
-        # return bboxes
-        # ---------------------------------------------------------------
-        
-        # 占位返回空列表
-        return []
+        results = self._model(color_image, verbose=False)
+        bboxes = []
+        for result in results:
+            for box in result.boxes:
+                cls = int(box.cls[0])
+                if cls != 0:  # COCO person class
+                    continue
+                conf = float(box.conf[0])
+                if conf < DETECTION_CONFIDENCE_THRESHOLD:
+                    continue
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+                bboxes.append((x1, y1, x2, y2, conf))
+        return bboxes
     
     def _get_depth_at_bbox(self, depth_image: Optional[np.ndarray],
                            x1: int, y1: int, x2: int, y2: int) -> float:
@@ -344,7 +304,7 @@ class VisionDetector:
             return -1.0
         
         # 深度图通常单位是毫米 (Intel RealSense)，转为米
-        # [需适配] 如果你的深度图单位不是毫米，请修改
+        # 如果你的深度图单位不是毫米，请修改
         depth_mm = float(np.median(valid))
         depth_m = depth_mm / 1000.0
         

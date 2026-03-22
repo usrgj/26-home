@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -L \"https://koide3.github.io/direct_visual_lidar_calibration/example/\")",
+      "Bash(curl -s -L \"https://koide3.github.io/direct_visual_lidar_calibration/programs/\")"
+    ]
+  }
+}

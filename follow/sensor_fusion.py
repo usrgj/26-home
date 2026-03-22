@@ -196,40 +196,60 @@ class SensorFusion:
             predicted_x=pred_x, predicted_y=pred_y,
         )
     
+    def set_vision_anchor(self, world_x: float, world_y: float):
+        """
+        设置视觉锚点——ReID 确认的目标世界坐标。
+        在有视觉确认的帧调用，后续 LiDAR 关联会优先使用此锚点。
+        锚点仅在下一次视觉更新前有效。
+        """
+        self._vision_anchor = (world_x, world_y)
+        self._vision_anchor_time = time.time()
+
     def associate_lidar_candidates(self, candidates: List[PersonCandidate],
-                                    gate_distance: float = 1.5
+                                    gate_distance: float = 0.8
                                     ) -> Optional[PersonCandidate]:
         """
         将LiDAR检测到的人物候选与当前跟踪目标做数据关联。
-        
-        使用马氏距离 (Mahalanobis distance) 门控：
-        - 在跟踪状态的不确定度范围内找最近的候选
-        - 距离超过 gate_distance 的候选被拒绝
-        
-        如果同时有视觉确认 (is_target=True)，优先信任视觉的关联结果，
-        然后在LiDAR候选中找与视觉目标位置最近的那个。
-        
+
+        关联策略（优先级从高到低）：
+        1. 如果有新鲜的视觉锚点（<1s），以锚点为中心搜索最近候选
+        2. 否则以 EKF 预测位置为中心搜索
+        3. coasting 时放宽门控
+
         参数:
             candidates: LiDAR检测到的所有人物候选
             gate_distance: 关联门控距离 (m)
-        
+
         返回:
             关联成功的候选，None表示没有匹配的
         """
         if not self._initialized or len(candidates) == 0:
             return None
-        
-        x, y = self._state[0], self._state[1]
-        
+
+        now = time.time()
+
+        # 选择关联中心：优先使用视觉锚点
+        anchor = getattr(self, '_vision_anchor', None)
+        anchor_time = getattr(self, '_vision_anchor_time', 0.0)
+        if anchor is not None and (now - anchor_time) < 1.0:
+            cx, cy = anchor
+        else:
+            cx, cy = self._state[0], self._state[1]
+
+        # coasting 时放宽门控（无观测时不确定度增大）
+        effective_gate = gate_distance
+        if self._coast_time > 0.3:
+            effective_gate = min(gate_distance + self._coast_time * 0.3, 1.5)
+
         best_candidate = None
         best_dist = float('inf')
-        
+
         for cand in candidates:
-            dist = math.hypot(cand.world_x - x, cand.world_y - y)
-            if dist < gate_distance and dist < best_dist:
+            dist = math.hypot(cand.world_x - cx, cand.world_y - cy)
+            if dist < effective_gate and dist < best_dist:
                 best_dist = dist
                 best_candidate = cand
-        
+
         return best_candidate
     
     # =====================================================================

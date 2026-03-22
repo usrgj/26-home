@@ -154,8 +154,9 @@ def main():
         print("  所有LiDAR点都会被视为动态物体")
         print("  建议先运行: python map_preprocessor.py log.txt ./maps/")
     
+    
     robot_api.wait_for_data()
-    print(22)
+
     print("\n请让目标人物站在机器人前方 1~2 米处")
     print("按 Enter 开始跟随 (Ctrl+C 紧急停止)...")
     input()
@@ -247,7 +248,6 @@ def main():
         robot_api.stop()
     except:
         pass
-    robot_api.disconnect()
     print("已退出")
 
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
-from follow.phase1_lidar_follow import main
-from agv_api import AGVManager, agv_manager
+from follow.main import main
+from agv_api import  agv_manager
 import time
-# from camera.config import CAMERA_CHEST
-# from camera import camera_manager
+from camera.config import CAMERA_CHEST,CAMERA_HEAD
+from camera import camera_manager
 
 PORT_STATUS = 19204
 PORT_CONTROL = 19205
@@ -14,7 +14,15 @@ PROT_PUSH = 19301
 
 if __name__ == "__main__":
     agv_manager.start()
+    cams = camera_manager
+    for serial in (CAMERA_HEAD, CAMERA_CHEST):
+        try:
+            cams.start(serial)
+        except RuntimeError as e:
+            print(f"[警告] 相机 {serial} 启动失败: {e}")
+
     try:
         main()
     finally:
         agv_manager.stop()
+        cams.stop_all()

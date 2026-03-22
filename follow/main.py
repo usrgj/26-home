@@ -4,7 +4,7 @@ main.py — 主入口，跟随系统主循环
 =============================================================================
 这是整个系统的入口文件。它将所有模块串联起来，执行以下循环:
 
-每个周期 (约 20Hz):
+每个周期 (约 10Hz):
   1. 获取机器人位姿
   2. 获取LiDAR数据 → 处理 → 提取动态人物候选
   3. 获取相机数据 → 检测人物 → ReID匹配
@@ -123,9 +123,7 @@ def main():
     logger.info("正在锁定跟随目标...")
     logger.info("  请确保目标人物站在机器人正前方，面朝相机")
     
-    # [需适配] 这里提供两种目标锁定方式:
-    
-    # 方式A: 自动锁定当前画面中最近的人
+    # 自动锁定当前画面中最近的人
     # 适合简单场景，机器人前方只有一个人
     target_locked = False
     try:
@@ -136,10 +134,6 @@ def main():
     if not target_locked:
         logger.warning("未能通过视觉锁定目标")
         logger.info("将在运行中尝试锁定第一个检测到的人")
-    
-    # 方式B: 手动指定目标的世界坐标来初始化EKF
-    # 如果你知道目标的初始位置，可以直接用:
-    # fusion.initialize(target_x, target_y, time.time())
     
     # -----------------------------------------------------------------
     # 4. 主循环
@@ -158,15 +152,19 @@ def main():
         loop_count += 1
         
         try:
+            try :
+                robot_api.get_state()
+            except:
+                print("拉取推送失败")
+                continue
             # =========================================================
             # Step 1: 获取机器人当前位姿
             # =========================================================
             try:
                 robot_pose = robot_api.get_robot_pose()
             except NotImplementedError:
-                # 如果位姿API未实现，用默认值 (仅用于调试)
-                from robot_api import RobotPose
-                robot_pose = RobotPose(0, 0, 0, time.time())
+                print("ERROR: 获取机器人世界坐标失败！")
+                continue
             
             # =========================================================
             # Step 2: LiDAR处理 (每帧都做，速度快)
@@ -225,50 +223,60 @@ def main():
             # 4a: 视觉观测更新
             if target_detection is not None:
                 fusion.update_with_vision(target_detection)
+                # 视觉 ReID 确认的位置作为锚点，引导后续 LiDAR 关联
+                fusion.set_vision_anchor(target_detection.world_x, target_detection.world_y)
             
             # 4b: LiDAR观测更新
             # 在LiDAR候选中找与跟踪目标最近的进行关联
+            matched_lidar = None
             if lidar_candidates:
-                matched = fusion.associate_lidar_candidates(lidar_candidates)
-                if matched is not None:
-                    fusion.update_with_lidar(matched)
-            
+                matched_lidar = fusion.associate_lidar_candidates(lidar_candidates)
+                if matched_lidar is not None:
+                    fusion.update_with_lidar(matched_lidar)
+
             # 4c: 如果本帧没有任何观测，做纯预测
-            if target_detection is None and (not lidar_candidates or 
-                fusion.associate_lidar_candidates(lidar_candidates) is None):
+            if target_detection is None and matched_lidar is None:
                 fusion.predict_only(now)
             
             # 获取当前目标状态
             target_state = fusion.get_target_state()
             
             # =========================================================
-            # Step 5: 状态机更新
+            # Step 5: 预计算控制指令 (用于卡住检测)
             # =========================================================
-            current_state = state_machine.update(target_state, robot_pose)
-            
+            cmd_linear = 0.0
+            cmd_angular = 0.0
+            if target_state.is_valid:
+                cmd_linear, cmd_angular = motion_ctrl.compute_velocity(
+                    target_state, robot_pose, obstacle_sectors
+                )
+
             # =========================================================
-            # Step 6: 根据状态执行控制
+            # Step 6: 状态机更新 (传入预计算速度用于卡住检测)
+            # =========================================================
+            current_state = state_machine.update(
+                target_state, robot_pose, cmd_linear_vel=cmd_linear
+            )
+
+            # =========================================================
+            # Step 7: 根据状态执行控制
             # =========================================================
             if current_state == FollowState.DIRECT_FOLLOW:
                 # --- 直接跟随模式 ---
                 if target_state.is_valid:
-                    linear_vel, angular_vel = motion_ctrl.follow_target(
-                        target_state, robot_pose, obstacle_sectors
-                    )
                     try:
-                        robot_api.send_velocity(linear_vel, angular_vel)
+                        robot_api.send_velocity(cmd_linear, cmd_angular)
                     except NotImplementedError:
                         pass
                 else:
-                    # 目标状态无效但还在直接跟随模式 (EKF超时)
                     motion_ctrl.stop()
-            
+
             elif current_state == FollowState.NAV_FOLLOW:
                 # --- 导航跟随模式 ---
                 # 导航指令由状态机内部发送 (调用 navigate_to)
                 # 这里不需要额外操作，导航系统自行控制
                 pass
-            
+
             elif current_state == FollowState.SEARCH:
                 # --- 搜索模式 ---
                 direction = state_machine.get_search_direction()
@@ -277,17 +285,17 @@ def main():
                     robot_api.send_velocity(linear_vel, angular_vel)
                 except NotImplementedError:
                     pass
-            
+
             elif current_state == FollowState.LOST:
                 # --- 丢失 ---
                 motion_ctrl.stop()
-            
+
             elif current_state == FollowState.IDLE:
                 # --- 空闲 ---
                 pass
             
             # =========================================================
-            # Step 7: 日志输出
+            # Step 8: 日志输出
             # =========================================================
             if loop_count % (MAIN_LOOP_RATE * 2) == 0:  # 每2秒打印一次
                 status = state_machine.get_status_str()
@@ -325,8 +333,8 @@ def main():
     # -----------------------------------------------------------------
     logger.info("正在停止...")
     state_machine.stop()
-    robot_api.disconnect()
-    logger.info("已退出")
+    logger.info("已退出人物跟随")
+    robot_api.release()
 
 
 # =============================================================================
