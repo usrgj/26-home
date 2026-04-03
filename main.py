@@ -1,19 +1,14 @@
 from __future__ import annotations
-from follow.main import main
-from agv_api import  agv_manager
+from common.follow.main import main
+from common.agv_api import  agv
 import time
-from camera.config import CAMERA_CHEST,CAMERA_HEAD
-from camera import camera_manager
+from common.camera.config import CAMERA_CHEST,CAMERA_HEAD
+from common.camera import camera_manager
 
-PORT_STATUS = 19204
-PORT_CONTROL = 19205
-PORT_NAVIGATION = 19206
-PORT_CONFIGUE = 19207
-PORT_OTHER = 19210
-PROT_PUSH = 19301
+
 
 if __name__ == "__main__":
-    agv_manager.start()
+    agv.start()
     cams = camera_manager
     for serial in (CAMERA_HEAD, CAMERA_CHEST):
         try:
@@ -24,5 +19,5 @@ if __name__ == "__main__":
     try:
         main()
     finally:
-        agv_manager.stop()
+        agv.stop()
         cams.stop_all()

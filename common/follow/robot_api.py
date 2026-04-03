@@ -116,10 +116,10 @@ class RobotAPI:
         TODO初始化与机器人的连接。
         例如：建立TCP连接、初始化SDK、连接相机等。
         """
-        from agv_api import agv_manager
+        from agv_api import agv
         from camera import camera_manager
         from camera.config import CAMERA_CHEST, CAMERA_HEAD
-        self._agv = agv_manager
+        self._agv = agv
         
         self._state: Dict = {}
         # 切换推送配置
@@ -139,24 +139,16 @@ class RobotAPI:
 
         返回: True=数据已到达, False=超时
         """
-        result = self._agv.query(19301, "2454", data={"interval": 50,
-                                      "included_fields": [
-                                        "x",
-                                        "y", 
-                                        "angle",
-                                        "task_status",
-                                        "vx",
-                                        "w",
-                                        "create_on",
-                                        "block_x",
-                                        "block_y"
-                                        ]})
+        result = self._agv.configure_push(interval=50, fields=[
+            "x", "y", "angle", "task_status",
+            "vx", "w", "create_on", "block_x", "block_y",
+        ])
         print(result)
         time.sleep(3)
         start = time.time()
         while time.time() - start < timeout:
             try:
-                result = self._agv.poll().response["data"]
+                result = self._agv.poll_push().response["data"]
                 # debug
                 # for i in range(20):
                 #     print(self._agv.poll().response["data"])
@@ -165,12 +157,12 @@ class RobotAPI:
                 return
             except:
                 time.sleep(0.1)
-                print(self._agv.poll())
+                print(self._agv.poll_push())
                 print("err")
         print("ERROR: 等待更新配置后的推送超时!!!")
 
     def get_state(self):
-        self._state = self._agv.poll().response["data"]
+        self._state = self._agv.poll_push().response["data"]
     # =====================================================================
     # 位姿与速度获取
     # =====================================================================
@@ -220,7 +212,7 @@ class RobotAPI:
         
         你需要将原始数据解析并填入 LidarScan 数据结构。
         """
-        raw_data = self._agv.query(19204, "03F1").response["data"].get("lasers")
+        raw_data = self._agv.get_lidar()
         if raw_data is None:
             raise NotImplementedError("获取激光雷达为空")
 
@@ -310,8 +302,7 @@ class RobotAPI:
         vx = max(-ROBOT_MAX_LINEAR_VEL, min(ROBOT_MAX_LINEAR_VEL, linear_vel))
         w = max(-ROBOT_MAX_ANGULAR_VEL, min(ROBOT_MAX_ANGULAR_VEL, angular_vel))
 
-        result = self._agv.query(19205, "07DA", data={
-            "vx": vx, "vy": 0.0, "w": w, "duration": 200})
+        self._agv.send_velocity(vx=vx, w=w)
         print(f'vx:{vx}, w:{w}')  
 
 
@@ -354,19 +345,7 @@ class RobotAPI:
         这个接口是非阻塞的，发送导航目标后立即返回。
         用 get_navigation_status() 查询导航状态。
         """
-        result = self._agv.query(19206, "0BEB", data={
-            "freeGo":{
-                "theta": theta,
-                "x": x,
-                "y": y
-            },
-            "id":"SELF_POSITION"
-            }
-        )
-
-        if result.response["data"].get("ret_code") != 0:
-            return False
-        return True
+        return self._agv.free_navigate_to(x, y, theta)
     
     def get_navigation_status(self) -> NavigationResult:
         """
@@ -390,7 +369,7 @@ class RobotAPI:
         取消当前导航任务。
         当需要从导航模式切回直接控制模式时调用。
         """
-        self._agv.send(19206, "0BBB")
+        self._agv.cancel_navigation()
     
     # =====================================================================
     # 地图接口
@@ -473,8 +452,5 @@ class RobotAPI:
         '''
         关闭机器人推送
         '''
-        self._agv.query(19301, "2454", data={"interval": 9990,
-                                "included_fields": [
-                                "create_on",                                
-                                ]})
+        self._agv.configure_push(interval=9990, fields=["create_on"])
         

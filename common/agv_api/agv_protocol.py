@@ -117,14 +117,16 @@ def recv_full_frame(sock: socket) -> bytes:
 
 
 def _recv_exact(sock: socket, n: int) -> bytes:
-    """循环读取，保证恰好读满 n 字节"""
-    buf = b''
-    while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
-        if not chunk:
+    """循环读取，保证恰好读满 n 字节（recv_into + memoryview 零拷贝）"""
+    buf = bytearray(n)
+    view = memoryview(buf)
+    pos = 0
+    while pos < n:
+        nbytes = sock.recv_into(view[pos:])
+        if not nbytes:
             raise ConnectionError("AGV 连接已断开")
-        buf += chunk
-    return buf
+        pos += nbytes
+    return bytes(buf)
 
 
 # ═════════════════════════════════════════════

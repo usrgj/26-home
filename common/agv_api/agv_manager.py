@@ -304,7 +304,6 @@ class AGVManager:
         except queue.Empty:
             return None
 
-agv_manager = AGVManager()
 
 # ── Demo ──────────────────────────────────────────────────────────────────
 
