@@ -7,7 +7,7 @@ log = logging.getLogger("task1.error_recovery")
 
 _STATE_ORDER = [
     "init", "receive_guest", "introduce",
-    "receive_bag", "follow_and_place", "finished",
+    "receive_bag", "follow_and_place", "release", "finished",
 ]
 
 
@@ -24,4 +24,4 @@ class ErrorRecovery(State):
                 log.info("跳过 [%s] → [%s]", failed, next_state)
                 return next_state
 
-        return "finished"
+        return "release"

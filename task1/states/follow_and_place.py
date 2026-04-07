@@ -41,4 +41,4 @@ class FollowAndPlace(State):
         # arm.go_home()
 
         # speech.say("The bag has been placed.")
-        return "finished"
+        return "release"
