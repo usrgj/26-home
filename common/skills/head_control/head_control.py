@@ -228,3 +228,5 @@ class HeadCameraController:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+pan_tilt = HeadCameraController()

@@ -1,5 +1,8 @@
 __pycache__/
-.claude
-.vscode
+.claude/
+.vscode/
 *.hdf5
 CLAUDE.md
+act/
+AGENTS.md
+.codex

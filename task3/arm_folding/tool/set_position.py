@@ -1,4 +1,4 @@
-from common.skills.gripper.gripper_servo import Gripper
+from common.skills.arm.gripper.gripper_servo import Gripper
 from Robotic_Arm.rm_robot_interface import *
 
 arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
-import numpy as np
 
 from task1 import config
 
@@ -12,9 +11,9 @@ from task1 import config
 class GuestInfo:
     name: str = ""
     favorite_drink: str = ""
-    face_encoding: Optional[np.ndarray] = None
+    person_id: int = -1                        # RoboCupReIDTracker 中的 person_id
     seat_id: str = ""
-    visual_features: dict = field(default_factory=dict)  # 衣服颜色等
+    visual_features: dict = field(default_factory=dict)  # LLM 提取的外貌特征
 
 
 class TaskContext:
@@ -24,7 +23,7 @@ class TaskContext:
         self.current_guest_index: int = 0  # 0=客人A, 1=客人B
 
         # 座位状态
-        self.seats = list(config.SEATS)
+        self.seats = [dict(s) for s in config.SEATS]
         for idx in config.PRE_OCCUPIED_SEATS:
             self.seats[idx]["occupied"] = True
 

@@ -6,8 +6,14 @@ import time
 import tempfile
 import os
 import json
-from client import analyze_person_features
-from seat_manager import SeatManager
+
+try:
+    from .client import analyze_person_features
+    from .seat_manager import SeatManager
+except ImportError:
+    # 兼容直接运行该文件进行单独调试
+    from client import analyze_person_features
+    from seat_manager import SeatManager
 
 
 class RoboCupReIDTracker:
@@ -93,7 +99,9 @@ class RoboCupReIDTracker:
         self.frame_count += 1
         matched = set()
         
-        # 每10帧提取一次人脸特征（加速）
+        # 正常情况下每10帧提取一次人脸特征以加速；
+        # 但对首次出现或附近没有可复用缓存的人，必须立即提取，
+        # 否则新客人永远无法在短时间窗口内完成绑定。
         do_face_extract = (self.frame_count % 10 == 0)
         
         for det in detections:
@@ -110,6 +118,9 @@ class RoboCupReIDTracker:
                         embedding = data['face_embedding']
                         face_conf = data.get('face_confidence', 0.0)
                         break
+
+                if embedding is None:
+                    embedding, face_conf = self.extract_face_embedding(frame, bbox)
             
             if embedding is None:
                 continue

@@ -35,3 +35,6 @@ HEAD_LOOK_DOWN = (0, -0x800)
 ARM_RECEIVE_BAG = 500000
 ARM_PLACE_BAG = 300000
 ARM_HOME = 0
+LEFT_HOME_JOINTS = [0, 0, 0, 0, 0, 0]  # 初始关节角度（度）
+RIGHT_HOME_JOINTS = [0, 0, 0, 0, 0, 0]  # 初始关节角度（度）
+ARM_SPEED = 50  # 运动速度 1~100

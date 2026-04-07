@@ -154,6 +154,9 @@ def extract_name(text):
     """从自然语句中提取名字（规则）"""
     if not text:
         return ""
+
+    text = text.strip()
+
     patterns = [
         r'(?:我叫|我是|名字是|姓名是|本人叫|本人是)\s*([^\s，。、]+)',
         r'叫\s*([^\s，。、]+)',
@@ -163,8 +166,38 @@ def extract_name(text):
         m = re.search(pattern, text)
         if m:
             return m.group(1)
+
+    english_patterns = [
+        r"(?i)\b(?:my name is|i am|i'm|im|this is)\s*([A-Za-z][A-Za-z'\-]{0,31})\b",
+        r"(?i)\bname\s*(?:is)?\s*([A-Za-z][A-Za-z'\-]{0,31})\b",
+        r"(?i)^([A-Za-z][A-Za-z'\-]{1,31})$",
+    ]
+    for pattern in english_patterns:
+        m = re.search(pattern, text)
+        if m:
+            name = m.group(1)
+            return _normalize_english_name(name)
+
+    compact_text = re.sub(r"[^A-Za-z]", "", text)
+    compact_patterns = [
+        r"(?i)(?:mynameis|iam|im|thisis)([A-Za-z]{2,32})$",
+        r"(?i)^([A-Za-z]{2,32})$",
+    ]
+    for pattern in compact_patterns:
+        m = re.search(pattern, compact_text)
+        if m:
+            name = m.group(1)
+            return _normalize_english_name(name)
+
     words = re.findall(r'[\u4e00-\u9fff]+', text)
     return words[-1] if words else text
+
+
+def _normalize_english_name(name):
+    name = re.sub(r"[^A-Za-z'\-]", "", name).strip("-'")
+    if not name:
+        return ""
+    return "-".join(part.capitalize() for part in name.split("-"))
 
 # ------------------ 语音助手类 ------------------
 class VoiceAssistant:
@@ -591,4 +624,3 @@ class VoiceAssistant:
         except Exception as e:
             print(f"[LLM单次调用错误] {e}")
             return None
-

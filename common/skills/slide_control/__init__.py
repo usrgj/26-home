@@ -1,1 +1,1 @@
-from .slide import slide_control, send_axis
+from .slide import slide_control

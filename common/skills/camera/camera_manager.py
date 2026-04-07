@@ -1,6 +1,16 @@
-# camera_manager.py
+"""
+相机管理器：按需获取、懒启动、统一管理生命周期。
+
+设计目标：
+- `start()` 保持阻塞语义，适合显式预热或工具脚本使用
+- `start_async()` 异步启动相机，避免状态机卡在启动流程
+- `get_frames()` 永远非阻塞，只返回当前缓存的最新帧；若尚无帧则返回 `(None, None)`
+"""
+from __future__ import annotations
+
 import pyrealsense2 as rs
 import numpy as np
+import threading
 import time
 from typing import Optional
 
@@ -21,41 +31,213 @@ class RealSenseCamera:
 
     def __init__(self, serial: str):
         self.serial = serial
-        self.pipeline = rs.pipeline()
-        self.config = rs.config()
+        self.pipeline = None
+        self.config = None
         self.align = None
         self.started = False
+        self.starting = False
         self.intrinsics = None  # rs.intrinsics: fx, fy, ppx, ppy
+        self._last_error: str | None = None
+        self._start_params = {"width": 640, "height": 480, "fps": 30}
+        self._latest_color: Optional[np.ndarray] = None
+        self._latest_depth: Optional[np.ndarray] = None
+        self._latest_timestamp: float = 0.0
+        self._frame_lock = threading.Lock()
+        self._state_lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._reader_thread: threading.Thread | None = None
+        self._starter_thread: threading.Thread | None = None
 
     def start(self, width=640, height=480, fps=30):
-        if self.started:
+        self._start_params = {"width": width, "height": height, "fps": fps}
+
+        launched = self._launch_start_thread()
+        with self._state_lock:
+            starter = self._starter_thread
+            already_started = self.started
+
+        if already_started:
             return
-        _hardware_reset(self.serial)
-        self.config.enable_device(self.serial)
-        self.config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
-        self.config.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
-        profile = self.pipeline.start(self.config)
-        self.align = rs.align(rs.stream.color)
-        # 获取彩色流的内参（对齐后深度流共享同一内参）
-        color_stream = profile.get_stream(rs.stream.color).as_video_stream_profile()
-        self.intrinsics = color_stream.get_intrinsics()
-        self.started = True
+
+        if starter and (launched or starter.is_alive()):
+            starter.join()
+
+        with self._state_lock:
+            if not self.started:
+                msg = self._last_error or f"相机 {self.serial} 启动失败"
+                raise RuntimeError(msg)
+
+    def start_async(self, width=640, height=480, fps=30):
+        self._start_params = {"width": width, "height": height, "fps": fps}
+        self._launch_start_thread()
+
+    def _launch_start_thread(self) -> bool:
+        with self._state_lock:
+            if self.started or self.starting:
+                return False
+            self.starting = True
+            self._last_error = None
+            self._stop_event.clear()
+            self._starter_thread = threading.Thread(
+                target=self._start_worker,
+                name=f"RealSenseStart-{self.serial}",
+                daemon=True,
+            )
+            self._starter_thread.start()
+            return True
+
+    def _start_worker(self):
+        pipeline = None
+        try:
+            params = dict(self._start_params)
+            _hardware_reset(self.serial)
+            if self._stop_event.is_set():
+                return
+
+            pipeline = rs.pipeline()
+            config = rs.config()
+            config.enable_device(self.serial)
+            config.enable_stream(
+                rs.stream.color,
+                params["width"],
+                params["height"],
+                rs.format.bgr8,
+                params["fps"],
+            )
+            config.enable_stream(
+                rs.stream.depth,
+                params["width"],
+                params["height"],
+                rs.format.z16,
+                params["fps"],
+            )
+            profile = pipeline.start(config)
+            align = rs.align(rs.stream.color)
+            color_stream = profile.get_stream(rs.stream.color).as_video_stream_profile()
+            intrinsics = color_stream.get_intrinsics()
+
+            if self._stop_event.is_set():
+                pipeline.stop()
+                return
+
+            with self._frame_lock:
+                self._latest_color = None
+                self._latest_depth = None
+                self._latest_timestamp = 0.0
+
+            with self._state_lock:
+                self.pipeline = pipeline
+                self.config = config
+                self.align = align
+                self.intrinsics = intrinsics
+                self.started = True
+                self._last_error = None
+                self._reader_thread = threading.Thread(
+                    target=self._reader_loop,
+                    name=f"RealSenseReader-{self.serial}",
+                    daemon=True,
+                )
+                self._reader_thread.start()
+        except Exception as e:
+            if pipeline is not None:
+                try:
+                    pipeline.stop()
+                except Exception:
+                    pass
+            with self._state_lock:
+                self.pipeline = None
+                self.config = None
+                self.align = None
+                self.intrinsics = None
+                self.started = False
+                self._last_error = f"相机 {self.serial} 启动失败: {e}"
+        finally:
+            with self._state_lock:
+                self.starting = False
+
+    def _reader_loop(self):
+        while not self._stop_event.is_set():
+            with self._state_lock:
+                pipeline = self.pipeline
+                align = self.align
+
+            if pipeline is None or align is None:
+                break
+
+            try:
+                frames = pipeline.wait_for_frames(timeout_ms=500)
+                aligned = align.process(frames)
+                color_frame = aligned.get_color_frame()
+                depth_frame = aligned.get_depth_frame()
+                if not color_frame or not depth_frame:
+                    continue
+
+                color = np.asanyarray(color_frame.get_data()).copy()
+                depth = np.asanyarray(depth_frame.get_data()).copy()
+
+                with self._frame_lock:
+                    self._latest_color = color
+                    self._latest_depth = depth
+                    self._latest_timestamp = time.time()
+            except RuntimeError:
+                if self._stop_event.is_set():
+                    break
+            except Exception as e:
+                with self._state_lock:
+                    self._last_error = f"相机 {self.serial} 读帧失败: {e}"
+                time.sleep(0.05)
 
     def get_frames(self):
-        if not self.started:
-            raise RuntimeError(f"相机 {self.serial} 未启动")
-        frames = self.pipeline.wait_for_frames()
-        aligned = self.align.process(frames)
-        color_frame = aligned.get_color_frame()
-        depth_frame = aligned.get_depth_frame()
-        if not color_frame or not depth_frame:
+        with self._state_lock:
+            started = self.started
+            starting = self.starting
+
+        if not started and not starting:
+            self._launch_start_thread()
             return None, None
-        return np.asanyarray(color_frame.get_data()), np.asanyarray(depth_frame.get_data())
+
+        with self._frame_lock:
+            return self._latest_color, self._latest_depth
+
+    @property
+    def latest_timestamp(self) -> float:
+        with self._frame_lock:
+            return self._latest_timestamp
 
     def stop(self):
-        if self.started:
-            self.pipeline.stop()
+        self._stop_event.set()
+
+        with self._state_lock:
+            starter = self._starter_thread
+            pipeline = self.pipeline
+            reader = self._reader_thread
+
+        if starter and starter.is_alive():
+            starter.join(timeout=5)
+
+        if pipeline is not None:
+            try:
+                pipeline.stop()
+            except Exception:
+                pass
+
+        if reader and reader.is_alive():
+            reader.join(timeout=5)
+
+        with self._state_lock:
+            self.pipeline = None
+            self.config = None
+            self.align = None
+            self.intrinsics = None
             self.started = False
+            self.starting = False
+            self._reader_thread = None
+            self._starter_thread = None
+
+        with self._frame_lock:
+            self._latest_color = None
+            self._latest_depth = None
+            self._latest_timestamp = 0.0
 
 
 class CameraManager:
@@ -80,6 +262,12 @@ class CameraManager:
         """获取并启动相机，一步到位"""
         cam = self.get(serial)
         cam.start(**kwargs)
+        return cam
+
+    def start_async(self, serial: str, **kwargs) -> RealSenseCamera:
+        """获取并异步启动相机，不阻塞调用线程"""
+        cam = self.get(serial)
+        cam.start_async(**kwargs)
         return cam
 
     def stop(self, serial: str):
