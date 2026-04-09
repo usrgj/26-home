@@ -1,1 +1,1 @@
-from .head_control import pan_tilt
+from .head_control import HeadCameraController, pan_tilt

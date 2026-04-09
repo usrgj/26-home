@@ -9,8 +9,8 @@ https://seer-group.feishu.cn/wiki/X0LSw4NRRiXTtGksoMxcQ4knnxh
 
 底层通过 AGVManager 的队列机制通信，线程安全。
 """
-
 from __future__ import annotations
+import time
 from typing import Optional
 from .agv_manager import AGVManager, Result
 
@@ -97,7 +97,23 @@ class AGVApi:
         return data.get("lasers") if data else None
 
     def get_task_status(self, simple: bool = True) -> dict | None:
-        """查询当前导航任务状态"""
+        """
+        查询当前导航任务状态
+
+        0 = NONE, 
+
+        1 = WAITING(目前不可能出现该状态), 
+
+        2 = RUNNING, 
+
+        3 = SUSPENDED, 
+
+        4 = COMPLETED, 
+
+        5 = FAILED, 
+        
+        6 = CANCELED
+        """
         return self._query_data(_STATUS, "03FC", {"simple": simple})
 
     def get_area_info(self) -> dict | None:
@@ -145,6 +161,8 @@ class AGVApi:
     def free_navigate_to(self, x: float, y: float, theta: float) -> bool:
         """
         自由导航到目标点
+
+        角度是弧度制
 
         :return: True=指令发送成功（不代表已到达）
         """
@@ -221,3 +239,24 @@ class AGVApi:
 
 # 模块级单例
 agv = AGVApi()
+
+def wait_nav(timeout: float = 30.0) -> bool:
+    """轮询等待导航完成"""
+    start = time.time()
+    while time.time() - start < timeout:
+        status = agv.get_task_status()
+        if status is None:
+            time.sleep(0.3)
+            continue
+        ts = status.get("task_status", "")
+        if ts == 4:
+            return True
+        if ts == 5:
+            print("导航失败")
+            return False
+        if ts == 6:
+            print("导航被取消")
+            return False
+        time.sleep(0.5)
+    print("导航超时")
+    return False

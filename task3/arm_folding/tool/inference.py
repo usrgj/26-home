@@ -3,33 +3,71 @@ ACT 模型真机推理脚本
 加载训练好的 ACT checkpoint，以 50Hz 主循环执行模型输出的动作。
 
 用法:
-    conda run -n fold python tool/inference.py
-    conda run -n fold python tool/inference.py --ckpt act/checkpoints/policy_best.ckpt
+    conda run -n fold python task3/arm_folding/tool/inference.py
+    conda run -n fold python task3/arm_folding/tool/inference.py --ckpt task3/arm_folding/act/checkpoints/policy_best.ckpt
 """
 
 import sys
-import os
 import time
 import threading
 import pickle
 import argparse
+from pathlib import Path
 
-import cv2
-import numpy as np
-import torch
+ROOT_DIR = Path(__file__).resolve().parents[3]
+ARM_FOLDING_DIR = Path(__file__).resolve().parents[1]
+ACT_DIR = ARM_FOLDING_DIR / "act"
+ACT_DETR_DIR = ACT_DIR / "detr"
+DEFAULT_CKPT = ACT_DIR / "checkpoints" / "policy_best.ckpt"
+DEFAULT_STATS = ACT_DIR / "checkpoints" / "dataset_stats.pkl"
 
-from Robotic_Arm.rm_robot_interface import *
+for path in (ACT_DETR_DIR, ACT_DIR, ROOT_DIR):
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
+    
 
-sys.path.insert(0, "camera")
-from camera_manager import camera_manager
+try:
+    import cv2
+except ImportError:  # pragma: no cover - runtime environment dependent
+    cv2 = None
 
-sys.path.insert(0, "gripper")
-from gripper_servo import Gripper, GripperError
-from gripper_io import IOGripper, IOGripperError
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - runtime environment dependent
+    np = None
 
-sys.path.insert(0, "act")
-sys.path.insert(0, os.path.join("act", "detr"))
-from policy import ACTPolicy
+try:
+    import torch
+except ImportError:  # pragma: no cover - runtime environment dependent
+    torch = None
+
+try:
+    from Robotic_Arm.rm_robot_interface import RoboticArm, rm_thread_mode_e
+except ImportError:  # pragma: no cover - runtime environment dependent
+    RoboticArm = None
+    rm_thread_mode_e = None
+
+try:
+    from common.skills.camera import camera_manager
+except ImportError:  # pragma: no cover - runtime environment dependent
+    camera_manager = None
+
+try:
+    from common.skills.arm.gripper.gripper_servo import Gripper, GripperError
+    from common.skills.arm.gripper.gripper_io import IOGripper, IOGripperError
+except ImportError:  # pragma: no cover - runtime environment dependent
+    Gripper = None
+    GripperError = Exception
+    IOGripper = None
+    IOGripperError = Exception
+
+ACT_IMPORT_ERROR = None
+try:
+    from policy import ACTPolicy
+except ImportError as exc:  # pragma: no cover - runtime environment dependent
+    ACTPolicy = None
+    ACT_IMPORT_ERROR = exc
 
 # ==================== 配置区 ====================
 LEFT_ARM_IP = "192.168.192.18"
@@ -47,8 +85,8 @@ RIGHT_INIT_JOINTS = [141.882, -54.571, -12.117, -62.232, -113.411, -27.554]
 INIT_SPEED = 20
 
 # RM65-B 6 轴关节限位（度）
-JOINT_LIMITS_MIN = np.array([-178, -130, -135, -178, -128, -360], dtype=np.float64)
-JOINT_LIMITS_MAX = np.array([ 178,  130,  135,  178,  128,  360], dtype=np.float64)
+JOINT_LIMITS_MIN = (-178, -130, -135, -178, -128, -360)
+JOINT_LIMITS_MAX = (178, 130, 135, 178, 128, 360)
 
 FREQ = 50
 DT = 1.0 / FREQ
@@ -75,6 +113,45 @@ CAM_ORDER = [
     ('cam_right_wrist', 'cam_right_wrist'),
 ]
 # ================================================
+
+
+def ensure_runtime_dependencies():
+    missing = []
+    if cv2 is None:
+        missing.append("opencv-python")
+    if np is None:
+        missing.append("numpy")
+    if torch is None:
+        missing.append("torch")
+    if RoboticArm is None or rm_thread_mode_e is None:
+        missing.append("Robotic_Arm.rm_robot_interface")
+    if camera_manager is None:
+        missing.append("common.skills.camera")
+    if Gripper is None or IOGripper is None:
+        missing.append("common.skills.arm.gripper")
+    if ACTPolicy is None:
+        if ACT_IMPORT_ERROR is not None:
+            missing.append(f"task3/arm_folding/act ({ACT_IMPORT_ERROR})")
+        else:
+            missing.append("task3/arm_folding/act")
+    if missing:
+        raise RuntimeError(f"Missing dependencies: {', '.join(missing)}")
+
+
+def resolve_resource_path(path_like: Path | str) -> Path:
+    path = Path(path_like).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+
+    cwd_candidate = path.resolve()
+    if cwd_candidate.exists():
+        return cwd_candidate
+
+    arm_folding_candidate = (ARM_FOLDING_DIR / path).resolve()
+    if arm_folding_candidate.exists():
+        return arm_folding_candidate
+
+    return cwd_candidate
 
 
 # ─── 复用 test.py 的硬件抽象 ────────────────────
@@ -137,7 +214,7 @@ def load_policy(ckpt_path, stats_path):
     """加载 ACT 模型和归一化统计量。"""
     print(f"加载模型: {ckpt_path}")
     policy = ACTPolicy(POLICY_CONFIG)
-    policy.load_state_dict(torch.load(ckpt_path, map_location='cpu', weights_only=False))
+    policy.load_state_dict(torch.load(str(ckpt_path), map_location='cpu', weights_only=False))
     policy.cuda()
     policy.eval()
 
@@ -222,13 +299,17 @@ def execute_action(action, left_arm, right_arm, left_gripper, right_gripper):
 
 def main():
     parser = argparse.ArgumentParser(description="ACT 真机推理")
-    parser.add_argument('--ckpt', default='act/checkpoints/policy_best.ckpt')
-    parser.add_argument('--stats', default='act/checkpoints/dataset_stats.pkl')
+    parser.add_argument('--ckpt', type=Path, default=DEFAULT_CKPT)
+    parser.add_argument('--stats', type=Path, default=DEFAULT_STATS)
     parser.add_argument('--max_steps', type=int, default=3000, help='最大执行步数')
     args = parser.parse_args()
+    ensure_runtime_dependencies()
+
+    ckpt_path = resolve_resource_path(args.ckpt)
+    stats_path = resolve_resource_path(args.stats)
 
     # ── 加载模型 ──
-    policy, qpos_mean, qpos_std, action_mean, action_std = load_policy(args.ckpt, args.stats)
+    policy, qpos_mean, qpos_std, action_mean, action_std = load_policy(ckpt_path, stats_path)
     chunk_size = POLICY_CONFIG['num_queries']
 
     # ── 连接双臂 ──

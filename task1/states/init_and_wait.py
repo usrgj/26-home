@@ -10,6 +10,9 @@ from common.skills.agv_api import agv
 from common.skills.arm import left_arm, right_arm, Gripper, IOGripper, GripperError, IOGripperError
 from common.skills.head_control import pan_tilt
 from common.skills.camera import camera_manager as cams
+
+from common.skills.audio_module import voice_assistant, doorbell, extract_name
+
 from common.config import CAMERA_HEAD, CAMERA_CHEST, CAMERA_LEFT, CAMERA_RIGHT
 from task1.config import LEFT_HOME_JOINTS, RIGHT_HOME_JOINTS, ARM_SPEED
 

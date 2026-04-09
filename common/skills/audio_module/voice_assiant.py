@@ -1,3 +1,12 @@
+"""
+语音与门铃交互模块。
+
+职责：
+- DoorbellDetector：监听环境音并检测门铃事件
+- extract_name：从 ASR 文本中提取姓名
+- VoiceAssistant：管理录音、VAD、降噪、ASR、TTS 和 LLM 对话
+"""
+
 import time
 import threading
 from enum import Enum
@@ -47,6 +56,8 @@ OFFLINE_TTS_BACKUP = "espeak"   # 需要系统安装: sudo apt install espeak
 
 # ------------------ 门铃检测类 ------------------
 class DoorbellDetector:
+    """基于 YAMNet 的门铃声音检测器。"""
+
     def __init__(self, threshold=0.5, chunk_seconds=1.0):
         """
         初始化门铃检测器
@@ -148,10 +159,19 @@ class DoorbellDetector:
     def wait_for_doorbell(self, timeout=None):
         """等待门铃，返回是否检测到（可设置超时）"""
         return self.doorbell_detected.wait(timeout)
+    
+doorbell = DoorbellDetector()
 
 # ------------------ 名字提取函数 ------------------
 def extract_name(text):
-    """从自然语句中提取名字（规则）"""
+    """
+    从 ASR 文本中提取姓名。
+
+    支持：
+    - 中文表达，如“我叫小明”
+    - 英文表达，如“My name is Jack”
+    - ASR 去空格后的紧凑表达，如“MynameisJack”
+    """
     if not text:
         return ""
 
@@ -194,6 +214,7 @@ def extract_name(text):
 
 
 def _normalize_english_name(name):
+    """规范化英文姓名的大小写和分隔符。"""
     name = re.sub(r"[^A-Za-z'\-]", "", name).strip("-'")
     if not name:
         return ""
@@ -201,7 +222,14 @@ def _normalize_english_name(name):
 
 # ------------------ 语音助手类 ------------------
 class VoiceAssistant:
+    """
+    语音助手。
+
+    提供麦克风流管理、录音、降噪、语音识别、语音播报和 LLM 调用等能力。
+    """
+
     def __init__(self, use_rnnoise=True):
+        """初始化音频设备、VAD、TTS 播放器和默认对话提示词。"""
         self.use_noise_suppression = use_rnnoise
         self.vad = webrtcvad.Vad(3)
         self.audio = pyaudio.PyAudio()
@@ -213,9 +241,6 @@ class VoiceAssistant:
         self.noise_floor = 500.0
         self.energy_history = collections.deque(maxlen=50)
         self.is_speech_threshold = 1.2
-        self.COMMON_DRINKS = ["可乐", "雪碧", "芬达", "美年达", "七喜", "果汁", "橙汁", "苹果汁",
-                              "牛奶", "酸奶", "水", "矿泉水", "茶", "红茶", "绿茶", "乌龙茶",
-                              "咖啡", "拿铁", "卡布奇诺", "啤酒", "红酒"]
         if self.use_noise_suppression:
             print("[信息] noisereduce降噪已启用")
         else:
@@ -225,7 +250,7 @@ class VoiceAssistant:
         self.offline_tts_available = self._check_offline_tts()
 
     def _check_offline_tts(self):
-        """检查 pico2wave 是否可用"""
+        """检查本机是否具备可用的离线 TTS 命令。"""
         try:
             subprocess.run([OFFLINE_TTS_CMD, "--help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1)
             print("[信息] 离线 TTS (pico2wave) 可用")
@@ -241,7 +266,7 @@ class VoiceAssistant:
                 return False
 
     def _offline_tts(self, text):
-        """使用离线 TTS 播放文本，返回是否成功"""
+        """尝试使用本地 TTS 合成并播放语音。"""
         if not self.offline_tts_available:
             return False
 
@@ -273,12 +298,12 @@ class VoiceAssistant:
             return False
 
     def _get_cache_path(self, text):
-        """根据文本内容生成缓存文件路径"""
+        """为一段文本生成稳定的 TTS 缓存路径。"""
         cache_key = hashlib.md5(text.encode('utf-8')).hexdigest()
         return os.path.join(TTS_CACHE_DIR, f"{cache_key}.mp3")
 
     def preload_tts(self, text):
-        """异步预加载文本音频（不播放）"""
+        """预先请求并缓存一段文本的 TTS 音频，但不播放。"""
         cache_path = self._get_cache_path(text)
         if os.path.exists(cache_path):
             return
@@ -350,6 +375,7 @@ class VoiceAssistant:
         self.resume_stream()
 
     def update_noise_floor(self, frame_energy, is_speech_vad):
+        """在非语音帧上更新背景噪声估计。"""
         if not is_speech_vad:
             self.energy_history.append(frame_energy)
             if len(self.energy_history) >= 10:
@@ -359,6 +385,7 @@ class VoiceAssistant:
                 self.noise_floor = min(max(noise_est * 1.2, 20.0), 8000.0)
 
     def calibrate_noise(self, duration_ms=1000):
+        """在安静环境下采样一段音频，初始化噪声基底。"""
         if self.stream is None:
             print("[警告] 音频流未打开，跳过噪声校准")
             return
@@ -376,6 +403,7 @@ class VoiceAssistant:
         print(f"[调试] 校准完成，噪声基底 = {self.noise_floor:.1f}")
 
     def denoise_with_noisereduce(self, audio_frames):
+        """对录音帧做 noisereduce 降噪，失败时回退到原始音频。"""
         if not audio_frames:
             return audio_frames
         try:
@@ -421,6 +449,7 @@ class VoiceAssistant:
             return audio_frames
 
     def clean_asr_text(self, text):
+        """清洗 ASR 返回文本，去掉特殊标记、语气词和多余空白。"""
         if not text:
             return ""
         cleaned = re.sub(r'<\|[^>]+\|>', '', text)
@@ -430,6 +459,7 @@ class VoiceAssistant:
         return cleaned
 
     def close(self):
+        """关闭录音流、释放 PyAudio 和 pygame 播放资源。"""
         self.stop_stream()
         self.audio.terminate()
         if pygame.mixer.get_init():
@@ -437,6 +467,7 @@ class VoiceAssistant:
             pygame.mixer.quit()
 
     def _init_system_prompt(self):
+        """初始化默认的 LLM 系统提示词和对话历史。"""
         self.system_prompt = (
             "你是一个派对接待机器人，名叫RoboHost。你的任务是热情迎接客人，询问他们的名字和最喜欢的饮料，"
             "引导他们就座，并在所有客人到达后介绍他们。说话要礼貌、友好，每次回答不超过两句话。"
@@ -444,6 +475,7 @@ class VoiceAssistant:
         self.history = [{"role": "system", "content": self.system_prompt}]
 
     def start_stream(self):
+        """打开麦克风输入流，并预读几帧清空缓冲。"""
         if self.stream is None:
             self.stream = self.audio.open(
                 format=FORMAT,
@@ -460,16 +492,19 @@ class VoiceAssistant:
                     pass
 
     def stop_stream(self):
+        """停止并关闭当前麦克风流。"""
         if self.stream:
             self.stream.stop_stream()
             self.stream.close()
             self.stream = None
 
     def pause_stream(self):
+        """暂停麦克风流，通常在播报 TTS 前调用。"""
         if self.stream and self.stream.is_active():
             self.stream.stop_stream()
 
     def resume_stream(self):
+        """恢复麦克风流，并丢弃恢复后的前几帧缓存。"""
         if self.stream and not self.stream.is_active():
             self.stream.start_stream()
             for _ in range(5):
@@ -478,7 +513,13 @@ class VoiceAssistant:
                 except:
                     pass
 
-    def record_utterance(self):
+    def record_utterance(self) -> list:
+        """
+        从麦克风录制一段完整话语。
+
+        依赖 VAD、能量阈值和静音超时来决定开始/结束位置。
+        返回值为原始音频帧列表。
+        """
         ring_buffer = collections.deque(maxlen=RING_BUFFER_MAXLEN)
         frames = []
         is_recording = False
@@ -536,6 +577,15 @@ class VoiceAssistant:
         return frames
 
     def recognize_speech(self, audio_frames):
+        """
+        将录到的音频送入 ASR 服务并返回识别文本。
+
+        该函数会：
+        - 可选降噪
+        - 保存原始/降噪后的调试音频
+        - 调用远端 ASR 服务
+        - 对返回文本做清洗
+        """
         if self.use_noise_suppression:
             denoised_frames = self.denoise_with_noisereduce(audio_frames)
         else:
@@ -584,6 +634,7 @@ class VoiceAssistant:
             os.unlink(temp_path)
 
     def ask_llm(self, user_input):
+        """带历史地调用 LLM，并把问答追加到对话上下文中。"""
         url = f"{LLM_BASE_URL}/chat/completions"
         self.history.append({"role": "user", "content": user_input})
         data = {
@@ -603,7 +654,7 @@ class VoiceAssistant:
         return reply
 
     def ask_llm_single(self, prompt, system_prompt=None):
-        """调用 LLM 进行单次对话，不保存历史"""
+        """调用 LLM 进行单次对话，不保存历史。"""
         url = f"{LLM_BASE_URL}/chat/completions"
         messages = []
         if system_prompt:
@@ -624,3 +675,5 @@ class VoiceAssistant:
         except Exception as e:
             print(f"[LLM单次调用错误] {e}")
             return None
+
+voice_assistant = VoiceAssistant()

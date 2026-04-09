@@ -1,206 +1,379 @@
 """
 头部相机运动控制模块
 
-通过 Modbus RTU 协议控制头部相机的左右旋转（地址01）和上下旋转（地址02）。
-两个设备均在 /dev/ttyS1，波特率 38400。
+本模块使用 MKS SERVO42/57D_RS485 电机的厂家串口协议：
+- 帧头/帧尾格式为 `FA ... checksum8`
+- 不是 Modbus RTU
+- 电机菜单需满足：
+  - `Mode = SR_CLOSE` 或 `SR_vFOC`
+  - `Mb_RTU = Disable`
 
-使用示例:
-    from head_camera_controller import HeadCameraController
+坐标单位为多圈编码器坐标值，手册定义为 16384 counts / 圈。
+例如：
+- `0x4000` = 360°
+- `0x1000` = 90°
+这个并不准确
 
-    camera = HeadCameraController(port='/dev/ttyS1')
+公共接口：
+- `clear_fault()`
+- `move_absolute(...)`
+- `move_relative(...)`
 
-    # 绝对位置控制（以下写法等价）
-    camera.rotate_horizontal(0x1000)
-    camera.rotate_horizontal("1000")        # 字符串自动按十六进制解析
-    camera.rotate_horizontal("-1000")       # 负方向
-
-    camera.rotate_vertical("2000", speed=400)
-
-    # 相对位置控制（在当前位置基础上偏移）
-    camera.rotate_horizontal_rel("500")
-    camera.rotate_vertical_rel("-300")
-
-    # 同时控制两个轴
-    camera.move(horizontal="1000", vertical="2000")
-    camera.move_rel(horizontal="100", vertical="-100")
-
-    # 回到原点
-    camera.home()
-
-    # 查看 / 校准位置
-    h, v = camera.get_position()
-    camera.set_position(horizontal="1000", vertical="2000")
-
-    camera.close()
+兼容接口：
+- `rotate_horizontal/rotate_vertical`
+- `rotate_horizontal_rel/rotate_vertical_rel`
+- `move/move_rel`
+- `home`
 """
 
-import serial
+from __future__ import annotations
+
+import threading
 import time
 
+import serial
 
 
-# 设备地址
-ADDR_HORIZONTAL = "01"  # 左右旋转
-ADDR_VERTICAL = "02"    # 上下旋转
+ADDR_HORIZONTAL = 0x01
+ADDR_VERTICAL = 0x02
 
-# 默认速度
+DEFAULT_PORT = "/dev/ttyS1"
+DEFAULT_BAUDRATE = 38400
+DEFAULT_RESPONSE_TIMEOUT = 0.3
 DEFAULT_SPEED = 600
+DEFAULT_ACCELERATION = 2
 
 
-class HeadCameraController:
-    def __init__(self, port='/dev/ttyS1', baudrate=38400, timeout=1):
-        """
-        初始化头部相机控制器
+class _SharedSerialPort:
+    """同一串口总线在进程内只打开一次，避免多实例争抢设备。"""
 
-        参数:
-            port: 串口端口号，Linux 如 '/dev/ttyS1'，Windows 如 'COM3'
-            baudrate: 波特率，默认 38400
-            timeout: 串口超时时间（秒）
-        """
+    _registry: dict[tuple[str, int], "_SharedSerialPort"] = {}
+    _registry_lock = threading.Lock()
+
+    def __init__(self, port: str, baudrate: int):
+        self.port = port
+        self.baudrate = baudrate
         self.serial = serial.Serial(
             port=port,
             baudrate=baudrate,
             bytesize=8,
             parity=serial.PARITY_NONE,
             stopbits=1,
-            timeout=timeout
+            timeout=0.02,
+            write_timeout=0.1,
         )
-        if not self.serial.is_open:
-            self.serial.open()
+        self.lock = threading.Lock()
+        self.refcount = 0
 
-        # 软件记录的当前位置（假设初始在原点）
-        self._pos_horizontal = 0
-        self._pos_vertical = 0
+    @classmethod
+    def acquire(cls, port: str, baudrate: int) -> tuple[tuple[str, int], "_SharedSerialPort"]:
+        key = (port, baudrate)
+        with cls._registry_lock:
+            bus = cls._registry.get(key)
+            if bus is None:
+                bus = cls(port, baudrate)
+                cls._registry[key] = bus
+            bus.refcount += 1
+            return key, bus
 
-    # ---- 绝对位置控制 ----
+    @classmethod
+    def release(cls, key: tuple[str, int]) -> None:
+        with cls._registry_lock:
+            bus = cls._registry.get(key)
+            if bus is None:
+                return
 
-    def rotate_horizontal(self, position, speed=DEFAULT_SPEED):
+            bus.refcount -= 1
+            if bus.refcount > 0:
+                return
+
+            try:
+                if bus.serial.is_open:
+                    bus.serial.close()
+            finally:
+                cls._registry.pop(key, None)
+
+
+class HeadCameraController:
+    def __init__(
+        self,
+        port: str = DEFAULT_PORT,
+        baudrate: int = DEFAULT_BAUDRATE,
+        timeout: float = DEFAULT_RESPONSE_TIMEOUT,
+    ):
+        self.port = port
+        self.baudrate = baudrate
+        self.timeout = timeout
+        self._bus_key: tuple[str, int] | None = None
+        self._bus: _SharedSerialPort | None = None
+
+    # ---- 公共接口 ----
+
+    def clear_fault(self, horizontal: bool = True, vertical: bool = True, reenable: bool = True) -> bool:
         """
-        左右旋转到绝对位置
+        清除指定轴的堵转/故障状态。
 
         参数:
-            position: 整数(0x1000)或十六进制字符串("1000", "-1000")
-            speed: 运动速度，默认 600
-        """
-        position = self._parse_position(position)
-        self._pos_horizontal = position
-        self._location_control(ADDR_HORIZONTAL, speed, position)
+            horizontal: 是否处理水平轴（地址 0x01）
+            vertical: 是否处理垂直轴（地址 0x02）
+            reenable: 清故障后是否立即重新发送使能指令
 
-    def rotate_vertical(self, position, speed=DEFAULT_SPEED):
+        返回:
+            所有被选中的轴都清故障成功则返回 True，否则返回 False。
+
+        说明:
+            该接口对应手册中的 0x3D 指令。若电机启用了堵转保护，
+            发生堵转后通常需要先清故障，再重新使能，才能继续运动。
         """
-        上下旋转到绝对位置
+        ok = True
+        for addr, enabled in self._selected_axes(horizontal, vertical):
+            if not enabled:
+                continue
+
+            status = self._command_status(addr, 0x3D)
+            ok = ok and (status == 0x01)
+
+            if reenable:
+                ok = ok and self._set_enabled(addr, True)
+
+        return ok
+
+    def move_absolute(
+        self,
+        horizontal=None,
+        vertical=None,
+        speed: int = DEFAULT_SPEED,
+        acceleration: int = DEFAULT_ACCELERATION,
+    ) -> None:
+        """
+        控制头部电机按绝对坐标运动。
 
         参数:
-            position: 整数(0x2000)或十六进制字符串("2000", "-2000")
-            speed: 运动速度，默认 600
+            horizontal: 水平轴目标坐标；None 表示该轴不动
+            vertical: 垂直轴目标坐标；None 表示该轴不动
+            speed: 目标速度，单位 RPM，范围 [0, 3000]
+            acceleration: 加速度参数，范围 [0, 255]
+
+        说明:
+            坐标单位为电机多圈编码器坐标值，16384 counts = 360°。
+            因此：
+            - 0x4000 表示一整圈
+            - 0x1000 表示 90°
+
+            传入字符串时，沿用旧接口习惯，默认按十六进制解析：
+            - "1000" -> 0x1000
+            - "-0800" -> -0x0800
+
+            该接口底层使用手册中的 0xF5 绝对坐标运动指令，
+            发送前会先确保对应轴已使能。
         """
-        position = self._parse_position(position)
-        self._pos_vertical = position
-        self._location_control(ADDR_VERTICAL, speed, position)
+        speed = self._validate_speed(speed)
+        acceleration = self._validate_acceleration(acceleration)
 
-    def move(self, horizontal=None, vertical=None, speed=DEFAULT_SPEED):
-        """同时控制两个轴到绝对位置，None 表示不动"""
         if horizontal is not None:
-            self.rotate_horizontal(horizontal, speed)
+            self._move_axis_absolute(ADDR_HORIZONTAL, self._parse_coordinate(horizontal), speed, acceleration)
         if vertical is not None:
-            self.rotate_vertical(vertical, speed)
+            self._move_axis_absolute(ADDR_VERTICAL, self._parse_coordinate(vertical), speed, acceleration)
 
-    # ---- 相对位置控制 ----
+    def move_relative(
+        self,
+        horizontal=None,
+        vertical=None,
+        speed: int = DEFAULT_SPEED,
+        acceleration: int = DEFAULT_ACCELERATION,
+    ) -> None:
+        """
+        控制头部电机在当前位置基础上做相对位移。
 
-    def rotate_horizontal_rel(self, offset, speed=DEFAULT_SPEED):
-        """左右旋转相对偏移"""
-        offset = self._parse_position(offset)
-        self.rotate_horizontal(self._pos_horizontal + offset, speed)
+        参数:
+            horizontal: 水平轴相对位移；None 表示该轴不动
+            vertical: 垂直轴相对位移；None 表示该轴不动
+            speed: 目标速度，单位 RPM，范围 [0, 3000]
+            acceleration: 加速度参数，范围 [0, 255]
 
-    def rotate_vertical_rel(self, offset, speed=DEFAULT_SPEED):
-        """上下旋转相对偏移"""
-        offset = self._parse_position(offset)
-        self.rotate_vertical(self._pos_vertical + offset, speed)
+        说明:
+            位移单位与绝对坐标相同，均为多圈编码器坐标值，
+            16384 counts = 360°。
 
-    def move_rel(self, horizontal=None, vertical=None, speed=DEFAULT_SPEED):
-        """同时对两个轴做相对偏移，None 表示不动"""
+            本接口不会依赖软件缓存位置，而是先读取电机当前真实坐标，
+            再计算目标绝对坐标并下发运动指令。因此即使电机曾被手动转动，
+            或上一条指令尚未更新到本地状态，也能得到更可靠的相对运动结果。
+        """
+        speed = self._validate_speed(speed)
+        acceleration = self._validate_acceleration(acceleration)
+
         if horizontal is not None:
-            self.rotate_horizontal_rel(horizontal, speed)
+            current = self._read_coordinate(ADDR_HORIZONTAL)
+            target = current + self._parse_coordinate(horizontal)
+            self._move_axis_absolute(ADDR_HORIZONTAL, target, speed, acceleration)
+
         if vertical is not None:
-            self.rotate_vertical_rel(vertical, speed)
+            current = self._read_coordinate(ADDR_VERTICAL)
+            target = current + self._parse_coordinate(vertical)
+            self._move_axis_absolute(ADDR_VERTICAL, target, speed, acceleration)
 
-    # ---- 辅助功能 ----
+    # ---- 兼容接口 ----
 
-    def home(self, speed=DEFAULT_SPEED):
-        """两个轴都回到原点"""
-        self.move(horizontal=0, vertical=0, speed=speed)
+    def rotate_horizontal(self, position, speed: int = DEFAULT_SPEED, acceleration: int = DEFAULT_ACCELERATION) -> None:
+        self.move_absolute(horizontal=position, speed=speed, acceleration=acceleration)
 
-    def get_position(self):
-        """获取当前记录的位置，返回 (horizontal, vertical)"""
-        return self._pos_horizontal, self._pos_vertical
+    def rotate_vertical(self, position, speed: int = DEFAULT_SPEED, acceleration: int = DEFAULT_ACCELERATION) -> None:
+        self.move_absolute(vertical=position, speed=speed, acceleration=acceleration)
 
-    def set_position(self, horizontal=0, vertical=0):
-        """手动校准位置记录（不发送指令，仅更新内部状态）"""
-        self._pos_horizontal = self._parse_position(horizontal)
-        self._pos_vertical = self._parse_position(vertical)
+    def move(self, horizontal=None, vertical=None, speed: int = DEFAULT_SPEED, acceleration: int = DEFAULT_ACCELERATION) -> None:
+        self.move_absolute(horizontal=horizontal, vertical=vertical, speed=speed, acceleration=acceleration)
 
-    def enable(self):
-        """发送使能指令，激活设备"""
-        msg = "FA01F300"
-        crc = self._checksum8(bytes.fromhex(msg))
-        msg = msg + f"{crc:02X}"
-        formatted_hex = ' '.join([msg[i:i + 2] for i in range(0, 10, 2)])
-        self._send_command(formatted_hex)
+    def rotate_horizontal_rel(self, offset, speed: int = DEFAULT_SPEED, acceleration: int = DEFAULT_ACCELERATION) -> None:
+        self.move_relative(horizontal=offset, speed=speed, acceleration=acceleration)
 
-    def close(self):
-        """关闭串口连接"""
-        if self.serial.is_open:
-            self.serial.close()
+    def rotate_vertical_rel(self, offset, speed: int = DEFAULT_SPEED, acceleration: int = DEFAULT_ACCELERATION) -> None:
+        self.move_relative(vertical=offset, speed=speed, acceleration=acceleration)
 
-    # ---- 内部方法（与原始工作脚本完全一致） ----
+    def move_rel(self, horizontal=None, vertical=None, speed: int = DEFAULT_SPEED, acceleration: int = DEFAULT_ACCELERATION) -> None:
+        self.move_relative(horizontal=horizontal, vertical=vertical, speed=speed, acceleration=acceleration)
 
-    def _location_control(self, addr, speed, absAxis):
-        """拼装位置控制报文并发送（逻辑与原始脚本一致）"""
-        msg = "FA" + str(addr) + "F5"
+    def home(self, speed: int = DEFAULT_SPEED, acceleration: int = DEFAULT_ACCELERATION) -> None:
+        """回到逻辑零点；前提是该零点已通过面板或 0x91/0x92 建立。"""
+        self.move_absolute(horizontal=0, vertical=0, speed=speed, acceleration=acceleration)
 
-        speed = f"{speed:X}"
-        speed_len = len(speed)
-        if speed_len < 4:
-            for i in range(4 - speed_len):
-                speed = "0" + speed
+    def get_position(self) -> tuple[int, int]:
+        return self._read_coordinate(ADDR_HORIZONTAL), self._read_coordinate(ADDR_VERTICAL)
 
-        msg = msg + speed
-        msg = msg + "02"
+    def enable(self, horizontal: bool = True, vertical: bool = True) -> bool:
+        ok = True
+        for addr, enabled in self._selected_axes(horizontal, vertical):
+            if enabled:
+                ok = ok and self._set_enabled(addr, True)
+        return ok
 
-        absAxis = self._int_to_hex(absAxis)
-        msg = msg + absAxis
-        msg = str(msg).replace(" ", "")
-        crc = self._checksum8(bytes.fromhex(msg))
-        msg = msg + f"{crc:02X}"
-        formatted_hex = ' '.join([msg[i:i + 2] for i in range(0, len(msg), 2)])
-        self._send_command(formatted_hex)
+    def close(self) -> None:
+        if self._bus_key is None:
+            return
 
-    def _send_command(self, hex_str):
-        """发送十六进制指令"""
-        if not self.serial.is_open:
-            print("串口未打开")
-            return False
+        _SharedSerialPort.release(self._bus_key)
+        self._bus_key = None
+        self._bus = None
+
+    # ---- 内部实现 ----
+
+    def _selected_axes(self, horizontal: bool, vertical: bool) -> tuple[tuple[int, bool], tuple[int, bool]]:
+        return ((ADDR_HORIZONTAL, horizontal), (ADDR_VERTICAL, vertical))
+
+    def _get_bus(self) -> _SharedSerialPort:
+        if self._bus is None:
+            self._bus_key, self._bus = _SharedSerialPort.acquire(self.port, self.baudrate)
+        return self._bus
+
+    def _move_axis_absolute(self, addr: int, coordinate: int, speed: int, acceleration: int) -> None:
+        self._set_enabled(addr, True)
+
+        payload = (
+            speed.to_bytes(2, byteorder="big", signed=False)
+            + acceleration.to_bytes(1, byteorder="big", signed=False)
+            + coordinate.to_bytes(4, byteorder="big", signed=True)
+        )
+        self._write_command(addr, 0xF5, payload)
+
+    def _set_enabled(self, addr: int, enabled: bool) -> bool:
+        status = self._command_status(addr, 0xF3, bytes([0x01 if enabled else 0x00]))
+        return status == 0x01
+
+    def _read_coordinate(self, addr: int) -> int:
+        frame = self._query(addr, 0x31, response_len=10)
+        raw = int.from_bytes(frame[3:9], byteorder="big", signed=False)
+        return self._twos_complement(raw, bits=48)
+
+    def _query(self, addr: int, func: int, payload: bytes = b"", response_len: int = 5) -> bytes:
+        frame = self._build_frame(addr, func, payload)
+        expected_prefix = bytes((0xFB, addr, func))
+
+        bus = self._get_bus()
+        with bus.lock:
+            self._reset_input_buffer_locked(bus.serial)
+            bus.serial.write(frame)
+            bus.serial.flush()
+            return self._read_matching_frame_locked(bus.serial, expected_prefix, response_len)
+
+    def _command_status(self, addr: int, func: int, payload: bytes = b"") -> int | None:
         try:
-            command_bytes = bytes.fromhex(hex_str)
-            self.serial.write(command_bytes)
-            print(f"[发送指令] {hex_str}")
-            return True
-        except Exception as e:
-            print(f"发送失败: {e}")
-            return False
+            frame = self._query(addr, func, payload=payload, response_len=5)
+        except TimeoutError:
+            return None
+        return frame[3]
+
+    def _write_command(self, addr: int, func: int, payload: bytes = b"") -> None:
+        frame = self._build_frame(addr, func, payload)
+        bus = self._get_bus()
+        with bus.lock:
+            self._reset_input_buffer_locked(bus.serial)
+            bus.serial.write(frame)
+            bus.serial.flush()
+
+    def _read_matching_frame_locked(self, ser: serial.Serial, prefix: bytes, response_len: int) -> bytes:
+        deadline = time.monotonic() + self.timeout
+        buffer = bytearray()
+
+        while time.monotonic() < deadline:
+            waiting = ser.in_waiting
+            if waiting:
+                buffer.extend(ser.read(waiting))
+            else:
+                chunk = ser.read(1)
+                if chunk:
+                    buffer.extend(chunk)
+
+            start = buffer.find(prefix)
+            if start >= 0 and len(buffer) >= start + response_len:
+                frame = bytes(buffer[start:start + response_len])
+                if self._checksum8(frame[:-1]) == frame[-1]:
+                    return frame
+                del buffer[:start + 1]
+                continue
+
+            if len(buffer) > response_len * 2:
+                del buffer[:-response_len]
+
+            time.sleep(0.002)
+
+        raise TimeoutError(f"Timeout waiting for response prefix={prefix.hex(' ')}")
 
     @staticmethod
-    def _parse_position(value):
-        """
-        解析位置值，支持整数和十六进制字符串
+    def _reset_input_buffer_locked(ser: serial.Serial) -> None:
+        try:
+            ser.reset_input_buffer()
+        except serial.SerialException:
+            while ser.in_waiting:
+                ser.read(ser.in_waiting)
 
-        "1000"  -> 0x1000 (4096)
-        "-1000" -> -0x1000 (-4096)
-        0x1000  -> 0x1000 (4096)
+    @staticmethod
+    def _build_frame(addr: int, func: int, payload: bytes = b"") -> bytes:
+        body = bytes((0xFA, addr, func)) + payload
+        return body + bytes((HeadCameraController._checksum8(body),))
+
+    @staticmethod
+    def _validate_speed(speed: int) -> int:
+        speed = int(speed)
+        if not 0 <= speed <= 3000:
+            raise ValueError("speed must be in range [0, 3000] RPM")
+        return speed
+
+    @staticmethod
+    def _validate_acceleration(acceleration: int) -> int:
+        acceleration = int(acceleration)
+        if not 0 <= acceleration <= 255:
+            raise ValueError("acceleration must be in range [0, 255]")
+        return acceleration
+
+    @staticmethod
+    def _parse_coordinate(value) -> int:
+        """
+        兼容原有写法：
+        - 传 int 时按整数坐标使用
+        - 传 str 时默认按十六进制解析，如 "1000" -> 0x1000
         """
         if isinstance(value, str):
             value = value.strip()
-            negative = value.startswith('-')
+            negative = value.startswith("-")
             if negative:
                 value = value[1:]
             result = int(value, 16)
@@ -208,25 +381,19 @@ class HeadCameraController:
         return int(value)
 
     @staticmethod
-    def _int_to_hex(value):
-        """将有符号整数转换为4字节大端十六进制字符串"""
-        if value < -0x80000000 or value > 0x7FFFFFFF:
-            raise ValueError("位置值超出32位有符号整数范围")
-        unsigned_value = value & 0xFFFFFFFF
-        hex_str = f"{unsigned_value:08X}"
-        return ' '.join([hex_str[i:i + 2] for i in range(0, 8, 2)])
+    def _twos_complement(value: int, bits: int) -> int:
+        sign_bit = 1 << (bits - 1)
+        return value - (1 << bits) if value & sign_bit else value
 
     @staticmethod
-    def _checksum8(data):
-        """计算 CHECKSUM-8 校验码"""
-        if isinstance(data, str):
-            data = data.encode('utf-8')
+    def _checksum8(data: bytes) -> int:
         return sum(data) & 0xFF
 
-    def __enter__(self):
+    def __enter__(self) -> "HeadCameraController":
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
+
 
 pan_tilt = HeadCameraController()
