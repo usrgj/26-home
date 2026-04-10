@@ -1,5 +1,3 @@
-from .human_tracker import RoboCupReIDTracker
-from .seat_manager import SeatManager
-
-__all__ = ['RoboCupReIDTracker', 'SeatManager']
+from .human_tracker import feature_extraction
+from .seat_manager import seat_manager
 

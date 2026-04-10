@@ -17,12 +17,6 @@ cleanup() {
 
 # 捕获退出信号（Ctrl+C、终止信号等）
 trap cleanup SIGINT SIGTERM
-# 启动chat模型
-echo "Starting llm program..."
-python run_llama_cpp.py &
-LLM_PID=$!
-
-sleep 3  # 等待聊天模型
 
 # 启动 TTS
 echo "Starting TTS server..."

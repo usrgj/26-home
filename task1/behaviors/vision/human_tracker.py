@@ -253,6 +253,7 @@ class RoboCupReIDTracker:
             return desc
         return "未知"
 
+feature_extraction = RoboCupReIDTracker(debug=False)
 
 def main():
     print("\n=== RoboCup@Home ReID + 大模型 ===")

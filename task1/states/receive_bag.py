@@ -13,6 +13,12 @@ from common.state_machine import State
 class ReceiveBag(State):
 
     def execute(self, ctx) -> str:
+        
+        # ── 1. 导航到第二位客人 ────────────────────────
+        # ── 2. 请求递包 ────────────────────────
+        # ── 3. 接包 ────────────────────────
+
+
         # 1. 面向第二位客人
         # TODO: 导航/转向到 guest_b 的座位附近
 

@@ -13,10 +13,10 @@ os.environ["MODELSCOPE_CACHE"] = str(CACHE_DIR)
 # 加载SenseVoiceSmall模型
 print("正在加载SenseVoiceSmall模型...")
 model = AutoModel(
-    model="iic/SenseVoiceSmall",
+    model="models/SenseVoiceSmall",
     trust_remote_code=True,
     vad_model="fsmn-vad",  # 可选，启用VAD提高准确率
-    device="cpu"
+    device="cuda"
 )
 print("模型加载完成！")
 

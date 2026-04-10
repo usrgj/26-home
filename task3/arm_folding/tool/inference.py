@@ -74,8 +74,9 @@ LEFT_ARM_IP = "192.168.192.18"
 RIGHT_ARM_IP = "192.168.192.19"
 ARM_PORT = 8080
 
-# 相机序列号
-CAM_HEAD = "151222072331"
+# 头部广角 USB 摄像头（设备号）
+CAM_HEAD_DEV = 10
+# 腕部 RealSense 序列号
 CAM_LEFT_WRIST = "141722075710"
 CAM_RIGHT_WRIST = "239722070896"
 
@@ -154,6 +155,26 @@ def resolve_resource_path(path_like: Path | str) -> Path:
     return cwd_candidate
 
 
+def resolve_torch_device(device_arg: str):
+    """解析推理设备，并打印当前实际使用的后端。"""
+    if device_arg == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device(device_arg)
+
+    if device.type == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("请求使用 CUDA，但当前 PyTorch 未检测到可用 GPU。")
+        device_name = torch.cuda.get_device_name(device)
+        print(f"推理设备: {device} ({device_name})")
+        if torch.backends.cudnn.is_available():
+            torch.backends.cudnn.benchmark = True
+    else:
+        print("推理设备: cpu")
+
+    return device
+
+
 # ─── 复用 test.py 的硬件抽象 ────────────────────
 
 class CameraGrabber:
@@ -183,6 +204,43 @@ class CameraGrabber:
         camera_manager.stop(self.serial)
 
 
+class USBCameraGrabber:
+    def __init__(self, device_id: int, name: str, width=640, height=480, fps=30):
+        self.device_id = device_id
+        self.name = name
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.latest_color = None
+        self._stop = threading.Event()
+
+    def start(self):
+        cap = cv2.VideoCapture(self.device_id)
+        if not cap.isOpened():
+            raise RuntimeError(f"无法打开USB摄像头 /dev/video{self.device_id}")
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        cap.set(cv2.CAP_PROP_FPS, self.fps)
+        self._cap = cap
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _loop(self):
+        while not self._stop.is_set():
+            ret, frame = self._cap.read()
+            if ret and frame is not None:
+                self.latest_color = frame
+
+    def get_latest(self):
+        return self.latest_color
+
+    def stop(self):
+        self._stop.set()
+        self._thread.join(timeout=2)
+        if hasattr(self, "_cap"):
+            self._cap.release()
+
+
 class ArmReader:
     def __init__(self, arm, name: str):
         self.arm = arm
@@ -208,14 +266,88 @@ class ArmReader:
         self._thread.join(timeout=2)
 
 
+def cleanup_runtime(
+    left_reader,
+    right_reader,
+    grabbers,
+    left_gripper,
+    right_gripper,
+    left_arm,
+    right_arm,
+):
+    """统一清理真机资源，确保异常退出也能释放相机和双臂。"""
+    print("\n清理中...")
+
+    if left_reader is not None:
+        left_reader.stop()
+    if right_reader is not None:
+        right_reader.stop()
+
+    for g in reversed(grabbers):
+        try:
+            g.stop()
+        except Exception as exc:
+            print(f"  释放相机 {getattr(g, 'name', '?')} 失败: {exc}")
+
+    if camera_manager is not None:
+        try:
+            camera_manager.stop_all()
+        except Exception as exc:
+            print(f"  camera_manager.stop_all() 失败: {exc}")
+
+    if grabbers:
+        time.sleep(0.5)
+
+    if left_arm is not None or right_arm is not None:
+        print("  移动到初始位...")
+    if left_arm is not None:
+        try:
+            left_arm.rm_movej(LEFT_INIT_JOINTS, v=INIT_SPEED, r=0, connect=0, block=1)
+        except Exception:
+            pass
+    if right_arm is not None:
+        try:
+            right_arm.rm_movej(RIGHT_INIT_JOINTS, v=INIT_SPEED, r=0, connect=0, block=1)
+        except Exception:
+            pass
+
+    if left_gripper is not None:
+        try:
+            left_gripper.open(block=True)
+        except Exception:
+            pass
+    if right_gripper is not None:
+        try:
+            right_gripper.open()
+        except Exception:
+            pass
+        try:
+            right_gripper.stop()
+        except Exception:
+            pass
+
+    if left_arm is not None:
+        try:
+            left_arm.rm_delete_robot_arm()
+        except Exception:
+            pass
+    if right_arm is not None:
+        try:
+            right_arm.rm_delete_robot_arm()
+        except Exception:
+            pass
+
+    print("  ✅ 完成")
+
+
 # ─── 模型加载 ──────────────────────────────────
 
-def load_policy(ckpt_path, stats_path):
+def load_policy(ckpt_path, stats_path, device):
     """加载 ACT 模型和归一化统计量。"""
     print(f"加载模型: {ckpt_path}")
     policy = ACTPolicy(POLICY_CONFIG)
     policy.load_state_dict(torch.load(str(ckpt_path), map_location='cpu', weights_only=False))
-    policy.cuda()
+    policy.to(device)
     policy.eval()
 
     total_params = sum(p.numel() for p in policy.parameters())
@@ -235,7 +367,7 @@ def load_policy(ckpt_path, stats_path):
 
 # ─── 观测预处理 ─────────────────────────────────
 
-def preprocess_qpos(left_deg, right_deg, left_grip, right_grip, qpos_mean, qpos_std):
+def preprocess_qpos(left_deg, right_deg, left_grip, right_grip, qpos_mean, qpos_std, device):
     """关节角(度) + 夹爪状态 → 归一化 qpos tensor (1, 14)。"""
     left_rad = np.radians(left_deg).astype(np.float32)
     right_rad = np.radians(right_deg).astype(np.float32)
@@ -244,10 +376,10 @@ def preprocess_qpos(left_deg, right_deg, left_grip, right_grip, qpos_mean, qpos_
 
     qpos_raw = np.array([*left_rad, lg, *right_rad, rg], dtype=np.float32)
     qpos_norm = (qpos_raw - qpos_mean) / qpos_std
-    return torch.from_numpy(qpos_norm).float().cuda().unsqueeze(0)
+    return torch.from_numpy(qpos_norm).float().to(device).unsqueeze(0)
 
 
-def preprocess_images(frames):
+def preprocess_images(frames, device):
     """BGR 帧 dict → tensor (1, num_cams, C, H, W)，仅 /255 转 float。
     ImageNet normalize 由 ACTPolicy.__call__ 内部完成。
     """
@@ -257,7 +389,7 @@ def preprocess_images(frames):
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         img = torch.from_numpy(rgb.transpose(2, 0, 1).astype(np.float32) / 255.0)
         images.append(img)
-    return torch.stack(images).unsqueeze(0).cuda()  # (1, 3, C, H, W)
+    return torch.stack(images).unsqueeze(0).to(device)  # (1, 3, C, H, W)
 
 
 # ─── 动作后处理与执行 ────────────────────────────
@@ -301,101 +433,120 @@ def main():
     parser = argparse.ArgumentParser(description="ACT 真机推理")
     parser.add_argument('--ckpt', type=Path, default=DEFAULT_CKPT)
     parser.add_argument('--stats', type=Path, default=DEFAULT_STATS)
+    parser.add_argument(
+        '--device',
+        choices=('auto', 'cuda', 'cpu'),
+        default='auto',
+        help='推理设备，默认 auto（优先 CUDA）',
+    )
     parser.add_argument('--max_steps', type=int, default=3000, help='最大执行步数')
     args = parser.parse_args()
     ensure_runtime_dependencies()
 
     ckpt_path = resolve_resource_path(args.ckpt)
     stats_path = resolve_resource_path(args.stats)
+    device = resolve_torch_device(args.device)
 
-    # ── 加载模型 ──
-    policy, qpos_mean, qpos_std, action_mean, action_std = load_policy(ckpt_path, stats_path)
-    chunk_size = POLICY_CONFIG['num_queries']
-
-    # ── 连接双臂 ──
-    print("\n连接左臂...")
-    left_arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)
-    lh = left_arm.rm_create_robot_arm(LEFT_ARM_IP, ARM_PORT)
-    assert lh.id != -1, "左臂连接失败"
-    print(f"  左臂连接成功 (ID={lh.id})")
-
-    print("连接右臂...")
-    right_arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)
-    rh = right_arm.rm_create_robot_arm(RIGHT_ARM_IP, ARM_PORT)
-    assert rh.id != -1, "右臂连接失败"
-    print(f"  右臂连接成功 (ID={rh.id})")
-
-    # ── 移动到 Home 位 ──
-    print("\n移动到初始位...")
-    t_left = threading.Thread(
-        target=left_arm.rm_movej,
-        args=(LEFT_INIT_JOINTS,),
-        kwargs=dict(v=INIT_SPEED, r=0, connect=0, block=1),
-    )
-    t_right = threading.Thread(
-        target=right_arm.rm_movej,
-        args=(RIGHT_INIT_JOINTS,),
-        kwargs=dict(v=INIT_SPEED, r=0, connect=0, block=1),
-    )
-    t_left.start()
-    t_right.start()
-    t_left.join()
-    t_right.join()
-    print("  ✅ 已到达初始位")
-
-    # ── 初始化夹爪 ──
-    left_gripper = Gripper(left_arm, raise_on_error=False)
-    right_gripper = IOGripper(right_arm, raise_on_error=False)
-    left_gripper.open(block=True)
-    right_gripper.open()
-    print("  ✅ 夹爪已张开")
-
-    # ── 启动相机 ──
-    print("\n启动相机...")
-    cam_config = {
-        'cam_head': CAM_HEAD,
-        'cam_left_wrist': CAM_LEFT_WRIST,
-        'cam_right_wrist': CAM_RIGHT_WRIST,
-    }
+    left_arm = None
+    right_arm = None
+    left_gripper = None
+    right_gripper = None
+    left_reader = None
+    right_reader = None
     grabbers = []
-    for name, serial in cam_config.items():
-        g = CameraGrabber(serial, name)
-        g.start()
-        grabbers.append(g)
-
-    print("  等待相机就绪...")
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        if all(g.latest_color is not None for g in grabbers):
-            break
-        time.sleep(0.1)
-    for g in grabbers:
-        status = "✅" if g.latest_color is not None else "❌"
-        print(f"  {status} {g.name}")
-
-    # ── 启动关节读取线程 ──
-    left_reader = ArmReader(left_arm, "左臂")
-    right_reader = ArmReader(right_arm, "右臂")
-    left_reader.start()
-    right_reader.start()
-    time.sleep(0.2)
-
-    # ── 等待开始 ──
-    print("\n" + "═" * 50)
-    print("  准备就绪，按 Enter 开始推理，Ctrl+C 中止")
-    print("═" * 50)
-    input()
-
-    # ── 50Hz 推理主循环 ──
-    print(f"开始推理 (最大 {args.max_steps} 步)...")
-    t_start = time.perf_counter()
-    all_actions = None
+    steps_executed = 0
+    elapsed = 0.0
 
     try:
+        # ── 加载模型 ──
+        policy, qpos_mean, qpos_std, action_mean, action_std = load_policy(ckpt_path, stats_path, device)
+        chunk_size = POLICY_CONFIG['num_queries']
+
+        # ── 连接双臂 ──
+        print("\n连接左臂...")
+        left_arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)
+        lh = left_arm.rm_create_robot_arm(LEFT_ARM_IP, ARM_PORT)
+        assert lh.id != -1, "左臂连接失败"
+        print(f"  左臂连接成功 (ID={lh.id})")
+
+        print("连接右臂...")
+        right_arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)
+        rh = right_arm.rm_create_robot_arm(RIGHT_ARM_IP, ARM_PORT)
+        assert rh.id != -1, "右臂连接失败"
+        print(f"  右臂连接成功 (ID={rh.id})")
+
+        # ── 移动到 Home 位 ──
+        print("\n移动到初始位...")
+        t_left = threading.Thread(
+            target=left_arm.rm_movej,
+            args=(LEFT_INIT_JOINTS,),
+            kwargs=dict(v=INIT_SPEED, r=0, connect=0, block=1),
+        )
+        t_right = threading.Thread(
+            target=right_arm.rm_movej,
+            args=(RIGHT_INIT_JOINTS,),
+            kwargs=dict(v=INIT_SPEED, r=0, connect=0, block=1),
+        )
+        t_left.start()
+        t_right.start()
+        t_left.join()
+        t_right.join()
+        print("  ✅ 已到达初始位")
+
+        # ── 初始化夹爪 ──
+        left_gripper = Gripper(left_arm, raise_on_error=False)
+        right_gripper = IOGripper(right_arm, raise_on_error=False)
+        left_gripper.open(block=True)
+        right_gripper.open()
+        print("  ✅ 夹爪已张开")
+
+        # ── 启动相机 ──
+        print("\n启动相机...")
+
+        print(f"  启动 cam_head (USB /dev/video{CAM_HEAD_DEV}) ...")
+        head_grabber = USBCameraGrabber(CAM_HEAD_DEV, "cam_head")
+        head_grabber.start()
+        grabbers.append(head_grabber)
+
+        for name, serial in (
+            ("cam_left_wrist", CAM_LEFT_WRIST),
+            ("cam_right_wrist", CAM_RIGHT_WRIST),
+        ):
+            print(f"  启动 {name} ({serial}) ...")
+            g = CameraGrabber(serial, name)
+            g.start()
+            grabbers.append(g)
+
+        print("  等待相机就绪...")
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if all(g.latest_color is not None for g in grabbers):
+                break
+            time.sleep(0.1)
+        for g in grabbers:
+            status = "✅" if g.latest_color is not None else "❌"
+            print(f"  {status} {g.name}")
+
+        # ── 启动关节读取线程 ──
+        left_reader = ArmReader(left_arm, "左臂")
+        right_reader = ArmReader(right_arm, "右臂")
+        left_reader.start()
+        right_reader.start()
+        time.sleep(0.2)
+
+        # ── 等待开始 ──
+        print("\n" + "═" * 50)
+        print("  准备就绪，按 Enter 开始推理，Ctrl+C 中止")
+        print("═" * 50)
+        input()
+
+        # ── 50Hz 推理主循环 ──
+        print(f"开始推理 (最大 {args.max_steps} 步)...")
+        t_start = time.perf_counter()
+        all_actions = None
+
         with torch.inference_mode():
             for t in range(args.max_steps):
-                t_tick = time.perf_counter()
-
                 # 读取观测
                 left_deg = left_reader.get_latest()
                 right_deg = right_reader.get_latest()
@@ -406,16 +557,15 @@ def main():
                 if any(frames[g.name] is None for g in grabbers):
                     continue
 
-                # 预处理
-                qpos_tensor = preprocess_qpos(
-                    left_deg, right_deg,
-                    left_gripper.is_open, right_gripper.is_open,
-                    qpos_mean, qpos_std,
-                )
-                image_tensor = preprocess_images(frames)
-
                 # 模型推理（每 chunk_size 步查询一次）
                 if t % chunk_size == 0:
+                    qpos_tensor = preprocess_qpos(
+                        left_deg, right_deg,
+                        left_gripper.is_open, right_gripper.is_open,
+                        qpos_mean, qpos_std,
+                        device,
+                    )
+                    image_tensor = preprocess_images(frames, device)
                     all_actions = policy(qpos_tensor, image_tensor)  # (1, 50, 14)
 
                 raw_action = all_actions[:, t % chunk_size]
@@ -425,6 +575,7 @@ def main():
 
                 # 执行
                 execute_action(action, left_arm, right_arm, left_gripper, right_gripper)
+                steps_executed = t + 1
 
                 # 进度打印
                 if t % 100 == 0:
@@ -442,41 +593,21 @@ def main():
 
     except KeyboardInterrupt:
         print("\n  用户中断")
+    finally:
+        if 't_start' in locals():
+            elapsed = time.perf_counter() - t_start
+            hz = steps_executed / elapsed if elapsed > 0 else 0.0
+            print(f"\n推理结束: {steps_executed} 步, {elapsed:.1f}s, 实际 {hz:.1f} Hz")
 
-    elapsed = time.perf_counter() - t_start
-    print(f"\n推理结束: {t+1} 步, {elapsed:.1f}s, 实际 {(t+1)/elapsed:.1f} Hz")
-
-    # ── 清理 ──
-    print("\n清理中...")
-    left_reader.stop()
-    right_reader.stop()
-    for g in grabbers:
-        g.stop()
-
-    # 回到 Home 位
-    print("  移动到初始位...")
-    t_left = threading.Thread(
-        target=left_arm.rm_movej,
-        args=(LEFT_INIT_JOINTS,),
-        kwargs=dict(v=INIT_SPEED, r=0, connect=0, block=1),
-    )
-    t_right = threading.Thread(
-        target=right_arm.rm_movej,
-        args=(RIGHT_INIT_JOINTS,),
-        kwargs=dict(v=INIT_SPEED, r=0, connect=0, block=1),
-    )
-    t_left.start()
-    t_right.start()
-    t_left.join()
-    t_right.join()
-
-    left_gripper.open(block=True)
-    right_gripper.open()
-    right_gripper.stop()
-
-    left_arm.rm_delete_robot_arm()
-    right_arm.rm_delete_robot_arm()
-    print("  ✅ 完成")
+        cleanup_runtime(
+            left_reader,
+            right_reader,
+            grabbers,
+            left_gripper,
+            right_gripper,
+            left_arm,
+            right_arm,
+        )
 
 
 if __name__ == "__main__":

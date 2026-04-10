@@ -26,6 +26,16 @@ def _hardware_reset(serial: str) -> None:
     raise RuntimeError(f"未找到相机 {serial}")
 
 
+def _is_retryable_start_error(exc: Exception) -> bool:
+    """识别 RealSense 启动时常见的临时占用错误。"""
+    text = str(exc).lower()
+    return (
+        "device or resource busy" in text
+        or "resource busy" in text
+        or "vidioc_s_fmt" in text
+    )
+
+
 class RealSenseCamera:
     """单个相机的封装"""
 
@@ -87,70 +97,84 @@ class RealSenseCamera:
             return True
 
     def _start_worker(self):
-        pipeline = None
+        params = dict(self._start_params)
+        last_error = None
         try:
-            params = dict(self._start_params)
-            _hardware_reset(self.serial)
-            if self._stop_event.is_set():
-                return
-
-            pipeline = rs.pipeline()
-            config = rs.config()
-            config.enable_device(self.serial)
-            config.enable_stream(
-                rs.stream.color,
-                params["width"],
-                params["height"],
-                rs.format.bgr8,
-                params["fps"],
-            )
-            config.enable_stream(
-                rs.stream.depth,
-                params["width"],
-                params["height"],
-                rs.format.z16,
-                params["fps"],
-            )
-            profile = pipeline.start(config)
-            align = rs.align(rs.stream.color)
-            color_stream = profile.get_stream(rs.stream.color).as_video_stream_profile()
-            intrinsics = color_stream.get_intrinsics()
-
-            if self._stop_event.is_set():
-                pipeline.stop()
-                return
-
-            with self._frame_lock:
-                self._latest_color = None
-                self._latest_depth = None
-                self._latest_timestamp = 0.0
-
-            with self._state_lock:
-                self.pipeline = pipeline
-                self.config = config
-                self.align = align
-                self.intrinsics = intrinsics
-                self.started = True
-                self._last_error = None
-                self._reader_thread = threading.Thread(
-                    target=self._reader_loop,
-                    name=f"RealSenseReader-{self.serial}",
-                    daemon=True,
-                )
-                self._reader_thread.start()
-        except Exception as e:
-            if pipeline is not None:
+            for attempt in range(1, 4):
+                pipeline = None
                 try:
-                    pipeline.stop()
-                except Exception:
-                    pass
+                    _hardware_reset(self.serial)
+                    if self._stop_event.is_set():
+                        return
+
+                    pipeline = rs.pipeline()
+                    config = rs.config()
+                    config.enable_device(self.serial)
+                    config.enable_stream(
+                        rs.stream.color,
+                        params["width"],
+                        params["height"],
+                        rs.format.bgr8,
+                        params["fps"],
+                    )
+                    config.enable_stream(
+                        rs.stream.depth,
+                        params["width"],
+                        params["height"],
+                        rs.format.z16,
+                        params["fps"],
+                    )
+                    profile = pipeline.start(config)
+                    align = rs.align(rs.stream.color)
+                    color_stream = profile.get_stream(rs.stream.color).as_video_stream_profile()
+                    intrinsics = color_stream.get_intrinsics()
+
+                    if self._stop_event.is_set():
+                        pipeline.stop()
+                        return
+
+                    with self._frame_lock:
+                        self._latest_color = None
+                        self._latest_depth = None
+                        self._latest_timestamp = 0.0
+
+                    with self._state_lock:
+                        self.pipeline = pipeline
+                        self.config = config
+                        self.align = align
+                        self.intrinsics = intrinsics
+                        self.started = True
+                        self._last_error = None
+                        self._reader_thread = threading.Thread(
+                            target=self._reader_loop,
+                            name=f"RealSenseReader-{self.serial}",
+                            daemon=True,
+                        )
+                        self._reader_thread.start()
+                    return
+                except Exception as e:
+                    last_error = e
+                    if pipeline is not None:
+                        try:
+                            pipeline.stop()
+                        except Exception:
+                            pass
+
+                    if self._stop_event.is_set():
+                        return
+
+                    if attempt < 3 and _is_retryable_start_error(e):
+                        time.sleep(1.0)
+                        continue
+                    break
+
             with self._state_lock:
                 self.pipeline = None
                 self.config = None
                 self.align = None
                 self.intrinsics = None
                 self.started = False
-                self._last_error = f"相机 {self.serial} 启动失败: {e}"
+                self._last_error = f"相机 {self.serial} 启动失败: {last_error}"
         finally:
             with self._state_lock:
                 self.starting = False
@@ -224,6 +248,9 @@ class RealSenseCamera:
         if reader and reader.is_alive():
             reader.join(timeout=5)
 
+        # 给驱动一点时间释放 /dev/video* 相关节点，降低下一次启动碰到 busy 的概率。
+        time.sleep(0.2)
+
         with self._state_lock:
             self.pipeline = None
             self.config = None
@@ -277,7 +304,7 @@ class CameraManager:
 
     def stop_all(self):
         """停止所有相机"""
-        for cam in self._cameras.values():
+        for cam in list(self._cameras.values()):
             cam.stop()
 
 

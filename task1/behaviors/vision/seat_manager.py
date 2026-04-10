@@ -182,6 +182,7 @@ class SeatManager:
                 'frames': 0
             }
 
+seat_manager = SeatManager(debug=False)
 
 # 使用示例
 if __name__ == '__main__':

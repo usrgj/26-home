@@ -24,7 +24,7 @@ from common.skills.camera import camera_manager
 from common.skills.head_control import pan_tilt
 from common.config import CAMERA_HEAD
 from common.skills.audio_module.voice_assiant import voice_assistant, doorbell, extract_name
-from task1.behaviors.vision import RoboCupReIDTracker
+from task1.behaviors.vision import seat_manager, feature_extraction
 from task1 import config
 
 log = logging.getLogger("task1.receive_guest")
@@ -95,7 +95,11 @@ class ReceiveGuest(State):
             agv.navigate_to(config.STATION_START, config.STATION_DOOR)
             wait_nav(timeout=config.NAV_TIMEOUT)
 
-            # ── 3. 视觉绑定（人脸 + LLM 特征提取）与持续注视 ──────────────────
+            # ── 3. 开门  ────────────────────────
+            #TODO
+
+            # ── 4. 视觉绑定 与  持续注视 ──────────────────
+            #TODO
             # pid, frame = _detect_and_bind(
             #     self.yolo, self.tracker, cam,
             #     guest.name if guest.name else f"guest_{i}",
@@ -106,7 +110,7 @@ class ReceiveGuest(State):
             #     if info:
             #         guest.visual_features = info.get("features", {})
 
-            # ── 4. 问好 + 询问姓名（+15 不提非必要问题） ────────────
+            # ── 5. 问好 + 询问姓名（+15 不提非必要问题） ────────────
             voice_assistant.speak("你好，欢迎来到我的家！请问你叫什么名字？")
             frames = voice_assistant.record_utterance() # 录入音频帧
             text = voice_assistant.recognize_speech(frames) # 提取音频中的文本
@@ -117,13 +121,14 @@ class ReceiveGuest(State):
             else:        
                 log.info("未识别到有效语音输入")
 
-            # ── 5. 询问饮品 ──────────────────────────────────────────
+            # ── 6. 询问饮品 ──────────────────────────────────────────
             voice_assistant.speak("那你要喝什么饮料呢？")
             frames = voice_assistant.record_utterance() # 录入音频帧
             text = voice_assistant.recognize_speech(frames) # 提取音频中的文本
             guest.drink = [drink for drink in config.COMMON_DRINKS if drink in text]
 
-            # ── 6. 导航到空座位（+100 提供空闲座位） ─────────────────
+            # ── 7. 导航到空座位（+100 提供空闲座位） ─────────────────
+            # TODO
             seat_id = ctx.find_free_seat()
             if seat_id:
                 self.va.speak("Please follow me, I will show you to your seat.")
@@ -139,6 +144,10 @@ class ReceiveGuest(State):
 
             # ── 8. 更新索引 ──────────────────────────────────────────
             ctx.current_guest_index += 1
+
+            # ── 9. 回到始点，机械臂归位 ────────────────────────
+            # TODO
+
 
         return "introduce"
 
