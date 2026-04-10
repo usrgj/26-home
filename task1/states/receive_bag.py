@@ -8,7 +8,8 @@
 """
 
 from common.state_machine import State
-
+from common.skills.arm import left_arm, right_arm, left_gripper
+import time
 
 class ReceiveBag(State):
 
@@ -26,6 +27,13 @@ class ReceiveBag(State):
         # speech.say(f"{ctx.guests[1].name}, could you please hand me your bag?")
 
         # 3. 机械臂到接包位置，夹爪张开
+        print(left_arm.rm_movej([-132.172,-69.632,-27.875,96.759,-5.229,-244.059], 20, 0, 0, 1))
+        left_gripper.open()
+        time.sleep(7)
+
+        left_gripper.grab(force=500)
+        print(left_arm.rm_movej([-112.305,-115.771,-67.401,2.997,7.318,-263.746], 20, 0, 0, 1))
+        time.sleep(2)
         # arm.go_receive_bag()
         # arm.release()
 

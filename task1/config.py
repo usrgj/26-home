@@ -9,6 +9,8 @@ LLM_VL_SERVER = "http://127.0.0.1:8004/v1"
 STATION_START = "start"          # 机器人起始位置
 STATION_DOOR = "door"            # 入口门
 STATION_LIVING_ROOM = "living"   # 客厅中心
+STATION_GUEST1 = ""
+STATION_GUEST2 = ""
 
 # ── 座位站点（按需增减） ─────────────────────────────────────────────────
 SEATS = [
@@ -16,6 +18,16 @@ SEATS = [
     {"id": "seat_2", "occupied": False},
     {"id": "seat_3", "occupied": False},
     {"id": "seat_4", "occupied": False},
+    {"id": "seat_5", "occupied": False},
+]
+
+# 位置对应的站点，因为不是每个位置都需要打一个站点，所以单独维护一个映射,角度是弧度
+SEATS_MAPPING = [
+    {"seat_id": "seat_1", "nav_id": "seat_nav1", "angle": 0},
+    {"seat_id": "seat_2", "nav_id": "seat_nav1", "angle": 0},
+    {"seat_id": "seat_3", "nav_id": "seat_nav2", "angle": 0},
+    {"seat_id": "seat_4", "nav_id": "seat_nav2", "angle": 0},
+    {"seat_id": "seat_5", "nav_id": "seat_nav3", "angle": 0},
 ]
 
 # 已被主人和无关人员占据的座位索引（赛前填入）
@@ -26,6 +38,7 @@ MATCH_TIMEOUT = 360        # 比赛总时限 6 分钟
 NAV_TIMEOUT = 30           # 单次导航超时
 LISTEN_TIMEOUT = 5         # 语音识别等待
 ASK_RETRIES = 3            # 语音问答重试次数
+FOLLOW_HOST_TIMEOUT = 90   # 跟随主人阶段超时
 
 # ── 云台预设角度 ─────────────────────────────────────────────────────────
 HEAD_FORWARD = (0, 0)

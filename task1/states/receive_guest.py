@@ -22,61 +22,22 @@ from common.state_machine import State
 from common.skills.agv_api import agv, wait_nav
 from common.skills.camera import camera_manager
 from common.skills.head_control import pan_tilt
-from common.config import CAMERA_HEAD
+from common.config import CAMERA_HEAD,
+from common.skills.arm import left_arm, right_arm
 from common.skills.audio_module.voice_assiant import voice_assistant, doorbell, extract_name
 from task1.behaviors.vision import seat_manager, feature_extraction
 from task1 import config
 
 log = logging.getLogger("task1.receive_guest")
 
-
-
-# ── 视觉检测辅助 ─────────────────────────────────────────────────────────
-
-def _detect_and_bind(yolo, tracker: RoboCupReIDTracker, cam, guest_name: str):
-    """
-    从相机取帧 → YOLO 检测 → tracker 更新 → 绑定最近的未分配人物
-    返回 (person_id, frame)，失败返回 (-1, None)
-    """
-    for _ in range(5):  # 多帧尝试，等人脸被检测到
-        color, depth = cam.get_frames()
-        if color is None:
-            time.sleep(0.1)
-            continue
-
-        results = yolo(color, conf=0.5, classes=0, verbose=False)
-        detections = []
-        for r in results:
-            for box in r.boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                detections.append({"bbox": (x1, y1, x2, y2)})
-
-        if not detections:
-            time.sleep(0.2)
-            continue
-
-        matched = tracker.update(detections, color)
-        pid = tracker.get_closest_unassigned_person(matched)
-        if pid is not None:
-            tracker.assign_guest_name(pid, guest_name, color)
-            log.info("客人 %s 绑定 → person_id=%d", guest_name, pid)
-            return pid, color
-
-        time.sleep(0.2)
-
-    log.warning("视觉绑定失败: %s", guest_name)
-    return -1, None
-
-
-# ═════════════════════════════════════════════════════════════════════════
-#  状态类
-# ═════════════════════════════════════════════════════════════════════════
-
 class ReceiveGuest(State):
     def execute(self, ctx) -> str:
         cam = camera_manager.get(CAMERA_HEAD)
 
         while ctx.current_guest_index < 2:
+            agv.navigate_to(agv.get_current_station(), config.STATION_START)
+            wait_nav(timeout=config.NAV_TIMEOUT)
+
             i = ctx.current_guest_index
             guest = ctx.current_guest
             log.info("========== 接待客人 #%d ==========", i)
@@ -128,7 +89,7 @@ class ReceiveGuest(State):
             guest.drink = [drink for drink in config.COMMON_DRINKS if drink in text]
 
             # ── 7. 导航到空座位（+100 提供空闲座位） ─────────────────
-            # TODO
+            # TODO 选定两个位置观察
             seat_id = ctx.find_free_seat()
             if seat_id:
                 self.va.speak("Please follow me, I will show you to your seat.")
@@ -146,17 +107,9 @@ class ReceiveGuest(State):
             ctx.current_guest_index += 1
 
             # ── 9. 回到始点，机械臂归位 ────────────────────────
-            # TODO
+            left_arm.rm_movej(config.LEFT_HOME_JOINTS, v=config.ARM_SPEED, r=0, connect=0, block=0)
+            right_arm.rm_movej(config.RIGHT_HOME_JOINTS, v=config.ARM_SPEED, r=0, connect=0, block=0)
+
 
 
         return "introduce"
-
-
-            # ── 6. 第二位客人时描述第一位外观（奖励 4×20） ───────────
-            # if i == 1 and ctx.guests[0].name:
-            #     desc = self.tracker.describe_guest(ctx.guests[0].name)
-            #     if desc and desc != "未知":
-            #         self.va.speak(
-            #             f"By the way, the other guest {ctx.guests[0].name} "
-            #             f"looks like: {desc}."
-            #         )

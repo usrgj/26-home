@@ -134,6 +134,10 @@ class VisionDetector:
             print(f"[VisionDetector] 已锁定跟随目标，特征维度: {len(self._target_feature)}")
         else:
             print("[VisionDetector] 警告: 检测结果没有特征向量，无法锁定目标")
+
+    def reset_target(self):
+        """清除当前已锁定的目标特征。"""
+        self._target_feature = None
     
     def lock_target_from_frame(self, robot_api: RobotAPI, camera_name: str = "head"):
         """

@@ -90,6 +90,16 @@ class StateMachine:
     
     def start(self):
         """开始跟随"""
+        self._vision_lost_since = 0.0
+        self._vision_recover_since = 0.0
+        self._target_visible = False
+        self._nav_goal_x = 0.0
+        self._nav_goal_y = 0.0
+        self._nav_goal_theta = 0.0
+        self._nav_sent = False
+        self._search_direction = 1.0
+        self._stuck_since = 0.0
+        self._is_stuck = False
         self._transition_to(FollowState.DIRECT_FOLLOW)
         logger.info("跟随开始 → DIRECT_FOLLOW")
     

@@ -12,10 +12,20 @@ robot_api.py — 机器人硬件抽象层
 import math
 import time
 import json
+import sys
 import numpy as np
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple
-from .config import ROBOT_MAX_LINEAR_VEL, ROBOT_MAX_ANGULAR_VEL
+
+if __package__ in (None, ""):
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+
+    from task1.behaviors.follow.config import ROBOT_MAX_LINEAR_VEL, ROBOT_MAX_ANGULAR_VEL
+else:
+    from .config import ROBOT_MAX_LINEAR_VEL, ROBOT_MAX_ANGULAR_VEL
 
 
 
@@ -116,8 +126,8 @@ class RobotAPI:
         TODO初始化与机器人的连接。
         例如：建立TCP连接、初始化SDK、连接相机等。
         """
-        from agv_api import agv
-        from camera import camera_manager
+        from common.skills.agv_api import agv
+        from common.skills.camera import camera_manager
         from common.config import CAMERA_CHEST, CAMERA_HEAD
         self._agv = agv
         

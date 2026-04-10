@@ -1,1 +1,9 @@
-from .main import main as follow_task
+from .runner import FollowRunner, FollowStepResult
+from .main import main, main as follow_task
+
+__all__ = [
+    "FollowRunner",
+    "FollowStepResult",
+    "main",
+    "follow_task",
+]
