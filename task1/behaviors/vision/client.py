@@ -70,3 +70,4 @@ def analyze_person_features(image_path):
         return {}
 
 
+

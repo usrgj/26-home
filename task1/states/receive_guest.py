@@ -439,7 +439,7 @@ def gaze(
         "target_point": (target_x, target_y),
         "raw_offset": (raw_dx, raw_dy),
         "command_offset": (cmd_dx, cmd_dy),
-        "centered": cmd_dx == 0 and cmd_dy == 0,
+        "cenxtered": cmd_dx == 0 and cmd_dy == 0,
     }
 
 
