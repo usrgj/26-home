@@ -8,8 +8,12 @@
 """
 
 from common.state_machine import State
+from common.skills.agv_api import agv, wait_nav
 from common.skills.arm import left_arm, right_arm, left_gripper
+from common.skills.audio_module.voice_assiant import voice_assistant
+from task1 import config
 import time
+import math
 
 class ReceiveBag(State):
 
@@ -22,9 +26,19 @@ class ReceiveBag(State):
 
         # 1. 面向第二位客人
         # TODO: 导航/转向到 guest_b 的座位附近
+        target_angle = config.INTRO_LOOK_ANGLES_DEG.get(agv.get_current_station(), {}).get(ctx.guests[1].seat_id)
+        pose = agv.get_pose()
+        if pose is None:
+          print("无法获取机器人位姿，跳过底盘转向")
+        try:
+            x = float(pose["x"])
+            y = float(pose["y"])
+            agv.free_navigate_to(x, y, math.radians(target_angle))
+        except (KeyError, TypeError, ValueError) as exc:
+            print("机器人位姿不完整，跳过底盘转向: %s", exc)
 
         # 2. 请求递包
-        # speech.say(f"{ctx.guests[1].name}, could you please hand me your bag?")
+        voice_assistant.speak("请把包递给我，我来帮您拿。")
 
         # 3. 机械臂到接包位置，夹爪张开
         print(left_arm.rm_movej([-132.172,-69.632,-27.875,96.759,-5.229,-244.059], 20, 0, 0, 1))
@@ -34,16 +48,9 @@ class ReceiveBag(State):
         left_gripper.grab(force=500)
         print(left_arm.rm_movej([-112.305,-115.771,-67.401,2.997,7.318,-263.746], 20, 0, 0, 1))
         time.sleep(2)
-        # arm.go_receive_bag()
-        # arm.release()
 
-        # 4. 等待包被放入（力反馈 / 视觉确认）
-        # TODO: 检测是否成功接到包
-
-        # 5. 夹爪闭合
-        # arm.grip()
 
         ctx.bag_received = True
 
-        # speech.say("Thank you. I'll take this to the host.")
+        
         return "follow_and_place"

@@ -7,3 +7,5 @@ act/
 AGENTS.md
 .codex
 tmp.py
+debug_ctx.example.json
+logs/

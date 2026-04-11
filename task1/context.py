@@ -40,7 +40,7 @@ class TaskContext:
     def find_free_seat(self) -> Optional[str]:
         """返回第一个空闲座位 ID，无空位返回 None"""
         for s in self.seats:
-            if not s["occupied"]:
+            if s["occupied"] is False:
                 return s["id"]
         return None
 

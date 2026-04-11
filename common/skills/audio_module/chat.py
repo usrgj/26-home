@@ -10,6 +10,7 @@ import re
 import glob
 import hashlib
 import shutil
+from pathlib import Path
 
 # 解决中文乱码
 sys.stdout.reconfigure(encoding='utf-8')
@@ -18,7 +19,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 app = FastAPI()
 
 VOICE = "zh-CN-XiaoxiaoNeural"
-BASE_DIR = "/home/luo/桌面/api"          # 请根据实际项目路径调整
+BASE_DIR = os.environ.get("AUDIO_BASE_DIR", str(Path(__file__).resolve().parent))
 AUDIO_DIR = os.path.join(BASE_DIR, "audio_cache")
 CACHE_DIR = os.path.join(AUDIO_DIR, "cache")
 MAX_FILES = 200
