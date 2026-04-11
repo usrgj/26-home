@@ -5,10 +5,10 @@ from insightface.app import FaceAnalysis
 import tempfile
 import os
 import json
-from client import analyze_person_features
-from seat_manager import SeatManager
-from head_control import HeadCameraController
-from gaze_tracking import get_person_direction, draw_direction_indicator
+from .client import analyze_person_features
+from .seat_manager import SeatManager
+from common.skills.head_control import HeadCameraController
+from .gaze_tracking import get_person_direction, draw_direction_indicator
 
 class RoboCupReIDTracker:
     def __init__(self, debug=False):

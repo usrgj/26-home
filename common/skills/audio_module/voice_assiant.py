@@ -95,7 +95,28 @@ def extract_drink(text):
         if drink in text_lower:
             return drink.capitalize()
     return None
-
+def wait_for_doorbell_with_fallback(detector):
+    print("Waiting for doorbell... (Press Enter to manually trigger)")
+    while True:
+        if detector and detector.wait_for_doorbell(timeout=0.5):
+            print("Doorbell detected!")
+            return True
+        if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
+            line = sys.stdin.readline()
+            if line.strip() == "":
+                print("Manual trigger by Enter key.")
+                return True
+def ask_info(assistant, prompt, extract_func, retry_prompt, default=None, max_attempts=2):
+    for attempt in range(max_attempts):
+        assistant.speak(prompt if attempt == 0 else retry_prompt)
+        audio = assistant.record()
+        if audio:
+            text = assistant.recognize(audio)
+            if text:
+                info = extract_func(text)
+                if info:
+                    return info
+    return default
 # ------------------ Doorbell Detector Class (Local Model) ------------------
 class DoorbellDetector:
     def __init__(self, threshold=0.5, chunk_seconds=1.0):
@@ -460,3 +481,71 @@ def get_voice_assistant():
 
 def create_doorbell_detector(threshold=0.5, chunk_seconds=1.0):
     return DoorbellDetector(threshold, chunk_seconds)
+
+def main():
+    # 初始化门铃检测器（可选，若不需要可设为 None）
+    try:
+        doorbell = DoorbellDetector(threshold=0.5)
+        doorbell.start()
+    except Exception as e:
+        print(f"门铃检测器启动失败: {e}，将使用手动触发")
+        doorbell = None
+
+    assistant = VoiceAssistant()
+    assistant.set_recording(0)  # 初始时关闭录音流
+
+    # 等待第一位客人
+    print("等待门铃... (按 Enter 手动触发)")
+    if doorbell:
+        wait_for_doorbell_with_fallback(doorbell)
+    else:
+        input("按 Enter 模拟门铃...")
+
+    assistant.set_recording(1)
+
+    name1 = ask_info(assistant,
+                     "Hello, welcome to the party! What's your name?",
+                     extract_name,
+                     "Sorry, I didn't catch your name. Could you say it again?",
+                     "Friend")
+    drink1 = ask_info(assistant,
+                      f"{name1}, what's your favorite drink?",
+                      extract_drink,
+                      "Sorry, I didn't catch that. What's your favorite drink?",
+                      "Water")
+    assistant.speak(f"Great, {name1}. Please have a seat.")
+
+    assistant.set_recording(0)
+
+    # 等待第二位客人
+    print("等待第二位客人门铃... (按 Enter 手动触发)")
+    if doorbell:
+        wait_for_doorbell_with_fallback(doorbell)
+    else:
+        input("按 Enter 模拟门铃...")
+
+    assistant.set_recording(1)
+
+    name2 = ask_info(assistant,
+                     "Hello, welcome to the party! What's your name?",
+                     extract_name,
+                     "Sorry, I didn't catch your name. Could you say it again?",
+                     "Friend")
+    drink2 = ask_info(assistant,
+                      f"{name2}, what's your favorite drink?",
+                      extract_drink,
+                      "Sorry, I didn't catch that. What's your favorite drink?",
+                      "Water")
+    assistant.speak(f"Great, {name2}. Please have a seat.")
+
+    assistant.speak(f"{name2}, let me introduce {name1}, who likes to drink {drink1}.")
+    assistant.speak(f"{name1}, this is {name2}, who likes to drink {drink2}.")
+    assistant.speak("Thank you both for coming! Enjoy the party.")
+
+    assistant.close()
+    if doorbell:
+        doorbell.stop()
+    print("程序结束。")
+
+if __name__ == "__main__":
+    main()

@@ -167,17 +167,16 @@ class ReceiveGuest(State):
     def _get_model(self) -> YOLO:
         """延迟初始化 YOLO，避免模块导入时立刻加载模型。"""
         if self._model is None:
-            self._model = YOLO("yolov8s.pt")
+            self._model = YOLO("yolov8n.pt")
         return self._model
 
 
 def _ask_guest_name() -> str:
     """通过语音询问并提取客人姓名。"""
-    prompt = "Hello, welcome to my home. What is your name?"
-    retry_prompt = "Sorry, I did not catch your name. Could you say it again?"
+    prompt = "你好，欢迎来到我家。请问你叫什么?"
 
     for attempt in range(config.ASK_RETRIES):
-        voice_assistant.speak(prompt if attempt == 0 else retry_prompt)
+        voice_assistant.speak(prompt)
         recognized_text = _record_and_recognize_text()
         if recognized_text:
             log.info("姓名语音识别结果: %s", recognized_text)
@@ -192,11 +191,10 @@ def _ask_guest_name() -> str:
 
 def _ask_guest_drink() -> str:
     """通过语音询问并提取客人喜爱饮品。"""
-    prompt = "What is your favorite drink?"
-    retry_prompt = "Sorry, I did not catch your favorite drink. Could you say it again?"
+    prompt = "你要喝点什么？"
 
     for attempt in range(config.ASK_RETRIES):
-        voice_assistant.speak(prompt if attempt == 0 else retry_prompt)
+        voice_assistant.speak(prompt)
         recognized_text = _record_and_recognize_text()
         if recognized_text:
             log.info("饮品语音识别结果: %s", recognized_text)
