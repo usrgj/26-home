@@ -6,14 +6,12 @@
 LLM_VL_SERVER = "http://127.0.0.1:8004/v1"
 
 # ── 场地站点 ID（对应地图上的点位名称）────────────────────────────────────
-STATION_START = "start"          # 机器人起始位置
-STATION_DOOR = "door"            # 入口门
-STATION_GUEST1 = "" # 第一个客人坐的位置
-STATION_GUEST2 = "" # 第二个客人坐的位置
+STATION_START = "LM1"          # 机器人起始位置
+STATION_DOOR = "LM2"            # 入口门
 STATION_OBSERVATION = "observation" # 第二个观察座位的站点
-STATION_SEAT1 = "seat1" # 五个位置，需要3个站点才能全部到达
-STATION_SEAT2 = "seat2"
-STATION_SEAT3 = "seat3"
+STATION_SEAT1 = "LM3" # 五个位置，需要3个站点才能全部到达
+STATION_SEAT2 = "LM4"
+STATION_SEAT3 = "LM5"
 
 # ── 座位状态 初始设为未知  ─────────────────────────────────────────────────
 SEATS = [
@@ -27,11 +25,11 @@ PRE_OCCUPIED_SEATS = []
 
 # 位置对应的导航站点；此处 angle 仍沿用导航接口既有配置语义
 SEATS_MAPPING = [
-    {"seat_id": "seat_1", "nav_id": "seat_nav1", "angle": 0},
-    {"seat_id": "seat_2", "nav_id": "seat_nav1", "angle": 0},
-    {"seat_id": "seat_3", "nav_id": "seat_nav2", "angle": 0},
-    {"seat_id": "seat_4", "nav_id": "seat_nav2", "angle": 0},
-    {"seat_id": "seat_5", "nav_id": "seat_nav3", "angle": 0},
+    {"seat_id": "seat_1", "nav_id": STATION_SEAT1, "angle": 69.414},
+    {"seat_id": "seat_2", "nav_id": STATION_SEAT1, "angle": 5.466},
+    {"seat_id": "seat_3", "nav_id": STATION_SEAT2, "angle": -109.08},
+    {"seat_id": "seat_4", "nav_id": STATION_SEAT2, "angle": 166.559},
+    {"seat_id": "seat_5", "nav_id": STATION_SEAT3, "angle": -92.636},
 ]
 
 # 介绍阶段使用的朝向配置：
@@ -40,27 +38,28 @@ SEATS_MAPPING = [
 # 值 = 底盘原地转向的目标角度（度）
 INTRO_LOOK_ANGLES_DEG = {
     "seat_nav1": {
-        "seat_1": 0.0,
-        "seat_2": 0.0,
-        "seat_3": 0.0,
-        "seat_4": 0.0,
-        "seat_5": 0.0,
+        "seat_1": 81.033,
+        "seat_2": 8.405,
+        "seat_3": 29.209,
+        "seat_4": 58.281,
+        "seat_5": 81.033,
     },
     "seat_nav2": {
-        "seat_1": 0.0,
-        "seat_2": 0.0,
-        "seat_3": 0.0,
-        "seat_4": 0.0,
-        "seat_5": 0.0,
+        "seat_1": -142.277,
+        "seat_2": -124.590,
+        "seat_3": -91.496,
+        "seat_4": 173.858,
+        "seat_5": -167.985,
     },
     "seat_nav3": {
-        "seat_1": 0.0,
-        "seat_2": 0.0,
-        "seat_3": 0.0,
-        "seat_4": 0.0,
-        "seat_5": 0.0,
+        "seat_1": -92.636,
+        "seat_2": -68.807,
+        "seat_3": -43.745,
+        "seat_4": -8.669,
+        "seat_5": -92.636,
     },
 }
+
 
 
 # ── 超时（秒） ───────────────────────────────────────────────────────────
@@ -77,9 +76,9 @@ FOLLOW_HOST_TIMEOUT = 90   # 跟随主人阶段超时
 ARM_RECEIVE_BAG = 500000
 ARM_PLACE_BAG = 300000
 ARM_HOME = 0
-LEFT_HOME_JOINTS = [0, 0, 0, 0, 0, 0]  # 初始关节角度（度）
-RIGHT_HOME_JOINTS = [0, 0, 0, 0, 0, 0]  # 初始关节角度（度）
-ARM_SPEED = 50  # 运动速度 1~100
+LEFT_HOME_JOINTS = [-29.1, -95.6, -53.0, 0.1, -34.6, 0]  # 初始关节角度（度）
+RIGHT_HOME_JOINTS = [30.0, -94.4, -25.7, -60.9, -31.6, 0]  # 初始关节角度（度）
+ARM_SPEED = 40  # 运动速度 1~100
 
 # ── 饮料列表 ───────────────────────────────────────────────────────────
 COMMON_DRINKS = ["可乐", "雪碧", "芬达", "美年达", "七喜", "果汁", "橙汁", "苹果汁",

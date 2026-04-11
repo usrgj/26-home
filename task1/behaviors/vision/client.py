@@ -7,7 +7,7 @@ import os
 
 client = OpenAI(
     api_key="retoo",
-    base_url="http://127.0.0.1:8004/v1"
+    base_url="http://127.0.0.1:8003/v1"
 )
 
 def image_to_base64(image_path):

@@ -173,11 +173,17 @@ class AGVApi:
         return data is not None and data.get("ret_code") == 0
     
     def navigate_to(self, source: str, target: str, angle: float = "") -> dict | None :
-        return self._query_data(_NAV, "0BEB", {
-            "source_id": source,
-            "id": target,
-            "angle": angle,
-        })
+        if angle != "":
+            return self._query_data(_NAV, "0BEB", {
+                "source_id": source,
+                "id": target,
+                "angle": angle,
+            })
+        else:
+            return self._query_data(_NAV, "0BEB", {
+                "source_id": source,
+                "id": target,
+            })
 
     def move_straight(self, dist: float, vx: float, mode: int = 0):
         """
