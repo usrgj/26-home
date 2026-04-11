@@ -38,6 +38,12 @@ class ReceiveGuest(State):
             agv.navigate_to(agv.get_current_station(), config.STATION_START)
             wait_nav(timeout=config.NAV_TIMEOUT)
 
+            # TODO
+            # 第一次进入循环时
+            # 提前在这里作为第一个观察位置，即使两个无关人员都是坐着，只要不遮挡，应该都能获取所有作为信息
+            #  从相机中取一帧，检测座位状态并更新 ctx.seats 状态
+            # 就是，拿这一帧进行人物检测，将人物检测的框 与座位的框进行比较，重叠度高的就认为这个座位被占了，重叠度低的就认为这个座位空着
+
             i = ctx.current_guest_index
             guest = ctx.current_guest
             log.info("========== 接待客人 #%d ==========", i)
@@ -59,7 +65,7 @@ class ReceiveGuest(State):
             # ── 3. 开门  ────────────────────────
             #TODO
 
-            # ── 4. 视觉绑定 与  持续注视 ──────────────────
+            # ── 4. 独立线程： 视觉绑定 与  持续注视 ──────────────────
             #TODO
             # pid, frame = _detect_and_bind(
             #     self.yolo, self.tracker, cam,
@@ -89,7 +95,9 @@ class ReceiveGuest(State):
             guest.drink = [drink for drink in config.COMMON_DRINKS if drink in text]
 
             # ── 7. 导航到空座位（+100 提供空闲座位） ─────────────────
-            # TODO 选定两个位置观察
+            # TODO 第一次循环时，如果有部分位置状态未知，那么就在这里再识别一次，
+            # 如果现场出现，start和door位置都看不到的情况，那就先导航到观察位置，更新座位状态，再导航
+
             seat_id = ctx.find_free_seat()
             if seat_id:
                 self.va.speak("Please follow me, I will show you to your seat.")

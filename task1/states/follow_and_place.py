@@ -54,7 +54,7 @@ class FollowAndPlace(State):
         runner = FollowRunner()
         follow_started_at = time.time()
 
-        _safe_speak("I have the bag. Please lead the way.")
+        _safe_speak("")
 
         try:
             target_locked = runner.start()

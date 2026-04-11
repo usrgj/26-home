@@ -8,17 +8,20 @@ LLM_VL_SERVER = "http://127.0.0.1:8004/v1"
 # ── 场地站点 ID（对应地图上的点位名称）────────────────────────────────────
 STATION_START = "start"          # 机器人起始位置
 STATION_DOOR = "door"            # 入口门
-STATION_LIVING_ROOM = "living"   # 客厅中心
-STATION_GUEST1 = ""
-STATION_GUEST2 = ""
+STATION_GUEST1 = "" # 第一个客人坐的位置
+STATION_GUEST2 = "" # 第二个客人坐的位置
+STATION_OBSERVATION = "observation" # 第二个观察座位的站点
+STATION_SEAT1 = "seat1" # 五个位置，需要3个站点才能全部到达
+STATION_SEAT2 = "seat2"
+STATION_SEAT3 = "seat3"
 
-# ── 座位站点（按需增减） ─────────────────────────────────────────────────
+# ── 座位状态 初始设为未知  ─────────────────────────────────────────────────
 SEATS = [
-    {"id": "seat_1", "occupied": False},
-    {"id": "seat_2", "occupied": False},
-    {"id": "seat_3", "occupied": False},
-    {"id": "seat_4", "occupied": False},
-    {"id": "seat_5", "occupied": False},
+    {"id": "seat_1", "occupied": None, "box1": [0, 0, 0, 0], "box2": [0, 0, 0, 0]},  # box1 是在第一个观察位置看到的座位框，box2 是在第二个观察位置看到的座位框，如果某个位置看不到这个座位就设为 [0,0,0,0]
+    {"id": "seat_2", "occupied": None, "box1": [0, 0, 0, 0], "box2": [0, 0, 0, 0]},
+    {"id": "seat_3", "occupied": None, "box1": [0, 0, 0, 0], "box2": [0, 0, 0, 0]},
+    {"id": "seat_4", "occupied": None, "box1": [0, 0, 0, 0], "box2": [0, 0, 0, 0]},
+    {"id": "seat_5", "occupied": None, "box1": [0, 0, 0, 0], "box2": [0, 0, 0, 0]},
 ]
 
 # 位置对应的站点，因为不是每个位置都需要打一个站点，所以单独维护一个映射,角度是弧度
@@ -30,8 +33,6 @@ SEATS_MAPPING = [
     {"seat_id": "seat_5", "nav_id": "seat_nav3", "angle": 0},
 ]
 
-# 已被主人和无关人员占据的座位索引（赛前填入）
-PRE_OCCUPIED_SEATS = [0, 1]  # 例如 seat_1, seat_2 被占
 
 # ── 超时（秒） ───────────────────────────────────────────────────────────
 MATCH_TIMEOUT = 360        # 比赛总时限 6 分钟
@@ -41,8 +42,7 @@ ASK_RETRIES = 3            # 语音问答重试次数
 FOLLOW_HOST_TIMEOUT = 90   # 跟随主人阶段超时
 
 # ── 云台预设角度 ─────────────────────────────────────────────────────────
-HEAD_FORWARD = (0, 0)
-HEAD_LOOK_DOWN = (0, -0x800)
+
 
 # ── 机械臂预设 ───────────────────────────────────────────────────────────
 ARM_RECEIVE_BAG = 500000

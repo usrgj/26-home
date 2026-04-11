@@ -1,4 +1,4 @@
-﻿# asr_server_sensesmall.py
+﻿﻿# asr_server_sensesmall.py
 from fastapi import FastAPI, File, UploadFile
 import uvicorn
 from funasr import AutoModel
@@ -42,7 +42,7 @@ async def speech_recognition(audio: UploadFile = File(...)):
     res = model.generate(
         input=audio_data,
         cache={},
-        language="zh",  # 自动识别语言
+        language="en",  # 自动识别语言
         use_itn=True      # 使用逆文本标准化
     )
     # 解析识别结果并处理异常情况

@@ -2,19 +2,13 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 from insightface.app import FaceAnalysis
-import time
 import tempfile
 import os
 import json
-
-try:
-    from .client import analyze_person_features
-    from .seat_manager import SeatManager
-except ImportError:
-    # 兼容直接运行该文件进行单独调试
-    from client import analyze_person_features
-    from seat_manager import SeatManager
-
+from client import analyze_person_features
+from seat_manager import SeatManager
+from head_control import HeadCameraController
+from gaze_tracking import get_person_direction, draw_direction_indicator
 
 class RoboCupReIDTracker:
     def __init__(self, debug=False):
@@ -27,13 +21,18 @@ class RoboCupReIDTracker:
         self.guest_features = {}
         self.debug = debug
         
-        # 人脸分析器
         self.face_analyzer = FaceAnalysis(name='buffalo_l')
         self.face_analyzer.prepare(ctx_id=0, det_size=(160, 160))
     
     def extract_face_embedding(self, frame, bbox):
-        """提取人脸特征向量"""
         x1, y1, x2, y2 = bbox
+        # ★ 扩大裁剪区域，提高人脸检测率
+        h, w = frame.shape[:2]
+        x1 = max(0, x1 - 10)
+        y1 = max(0, y1 - 10)
+        x2 = min(w, x2 + 10)
+        y2 = min(h, y2 + 10)
+        
         crop = frame[y1:y2, x1:x2]
         if crop.size == 0:
             return None, 0.0
@@ -42,67 +41,46 @@ class RoboCupReIDTracker:
             faces = self.face_analyzer.get(crop)
             if faces:
                 face = faces[0]
-                embedding = face.embedding
-                confidence = float(face.det_score) if hasattr(face, 'det_score') else 0.9
-                return embedding, confidence
+                return face.embedding, float(face.det_score) if hasattr(face, 'det_score') else 0.9
         except Exception as e:
             if self.debug:
                 print(f"❗ 人脸提取失败: {e}")
         return None, 0.0
     
-    def calc_distance(self, bbox):
-        """计算人体距离（用面积代替）"""
-        x1, y1, x2, y2 = bbox
-        area = (x2 - x1) * (y2 - y1)
-        return -area
-    
-    def match_person(self, embedding, threshold=0.5):
-        """匹配已知人物"""
-        if not self.persons or embedding is None:
-            return None, 0.0
-        
-        best_id = None
-        best_sim = threshold
-        
-        for pid, data in self.persons.items():
-            if data['face_embedding'] is not None:
-                sim = np.dot(embedding, data['face_embedding']) / (
-                    np.linalg.norm(embedding) * np.linalg.norm(data['face_embedding']) + 1e-5
-                )
-                if sim > best_sim:
-                    best_sim = sim
-                    best_id = pid
-        
-        return best_id, best_sim
-    
-    def match_guest(self, embedding, threshold=0.6):
-        """匹配已绑定的客人"""
+    def match_guest(self, embedding, threshold=0.55):  # ★ 降低阈值，提高匹配率
         if not self.guest_embeddings or embedding is None:
             return None, 0.0
         
-        best_name = None
-        best_sim = threshold
-        
-        for guest_name, embeddings_list in self.guest_embeddings.items():
-            for emb in embeddings_list:
+        best_name, best_sim = None, threshold
+        for guest_name, emb_list in self.guest_embeddings.items():
+            for emb in emb_list:
                 sim = np.dot(embedding, emb) / (
                     np.linalg.norm(embedding) * np.linalg.norm(emb) + 1e-5
                 )
                 if sim > best_sim:
-                    best_sim = sim
-                    best_name = guest_name
-        
+                    best_sim, best_name = sim, guest_name
         return best_name, best_sim
+    def match_person(self, embedding):
+        best_pid, best_sim = None, 0.5
+        for pid, data in self.persons.items():
+            emb = data.get('face_embedding')
+            if emb is None:
+               continue
+            sim = np.dot(embedding, emb) / (
+            np.linalg.norm(embedding) * np.linalg.norm(emb) + 1e-5)
+            if sim > best_sim:
+              best_sim, best_pid = sim, pid
+        return best_pid, best_sim
+    def calc_distance(self, bbox):
+         x1, y1, x2, y2 = bbox
+         return (x2 - x1) * (y2 - y1)
+
+
     
     def update(self, detections, frame):
-        """更新追踪状态"""
         self.frame_count += 1
         matched = set()
-        
-        # 正常情况下每10帧提取一次人脸特征以加速；
-        # 但对首次出现或附近没有可复用缓存的人，必须立即提取，
-        # 否则新客人永远无法在短时间窗口内完成绑定。
-        do_face_extract = (self.frame_count % 10 == 0)
+        do_face_extract = (self.frame_count % 5 == 0)  # ★ 改成每5帧提取一次，提高识别频率
         
         for det in detections:
             bbox = det['bbox']
@@ -110,263 +88,396 @@ class RoboCupReIDTracker:
             if do_face_extract:
                 embedding, face_conf = self.extract_face_embedding(frame, bbox)
             else:
-                # 使用缓存特征
                 embedding = None
                 face_conf = 0.0
+                # ★ 改进缓存匹配逻辑
                 for pid, data in self.persons.items():
-                    if abs(data['bbox'][0] - bbox[0]) < 100 and abs(data['bbox'][1] - bbox[1]) < 100:
-                        embedding = data['face_embedding']
-                        face_conf = data.get('face_confidence', 0.0)
-                        break
-
-                if embedding is None:
-                    embedding, face_conf = self.extract_face_embedding(frame, bbox)
+                    px1, py1, px2, py2 = data['bbox']
+                    x1, y1, x2, y2 = bbox
+                    # 计算IoU
+                    ix1, iy1 = max(px1, x1), max(py1, y1)
+                    ix2, iy2 = min(px2, x2), min(py2, y2)
+                    if ix1 < ix2 and iy1 < iy2:
+                        inter = (ix2 - ix1) * (iy2 - iy1)
+                        union = (px2-px1)*(py2-py1) + (x2-x1)*(y2-y1) - inter
+                        iou = inter / (union + 1e-5)
+                        if iou > 0.3:  # IoU阈值
+                            embedding = data['face_embedding']
+                            face_conf = data.get('face_confidence', 0.0)
+                            break
             
             if embedding is None:
                 continue
             
-            # 先匹配已绑定的客人
-            matched_guest, guest_sim = self.match_guest(embedding, threshold=0.6)
+            # ★ 先匹配已绑定客人
+            matched_guest, guest_sim = self.match_guest(embedding, 0.55)
             if matched_guest:
                 pid = self.target_guests[matched_guest]
                 if pid in self.persons:
-                    self.persons[pid]['face_embedding'] = embedding
-                    self.persons[pid]['face_confidence'] = face_conf
-                    self.persons[pid]['guest_similarity'] = guest_sim
-                    self.persons[pid]['bbox'] = bbox
-                    self.persons[pid]['distance'] = self.calc_distance(bbox)
-                    self.persons[pid]['last_seen'] = self.frame_count
+                    self.persons[pid].update({
+                        'face_embedding': embedding, 'face_confidence': face_conf,
+                        'guest_similarity': guest_sim, 'bbox': bbox,
+                        'distance': self.calc_distance(bbox), 'last_seen': self.frame_count
+                    })
                     matched.add(pid)
                     continue
             
-            # 再匹配已知人物
             pid, person_sim = self.match_person(embedding)
-            
             if pid is None:
-                # 新人物
                 pid = self.person_counter
                 self.person_counter += 1
                 self.persons[pid] = {
-                    'face_embedding': embedding,
-                    'face_confidence': face_conf,
-                    'person_similarity': 0.0,
-                    'guest_similarity': 0.0,
-                    'name': '',
-                    'bbox': bbox,
-                    'distance': self.calc_distance(bbox),
-                    'last_seen': self.frame_count,
-                    'features': {}
+                    'face_embedding': embedding, 'face_confidence': face_conf,
+                    'person_similarity': 0.0, 'guest_similarity': 0.0, 'name': '',
+                    'bbox': bbox, 'distance': self.calc_distance(bbox),
+                    'last_seen': self.frame_count, 'features': {}
                 }
             else:
-                # 更新已知人物
-                self.persons[pid]['face_embedding'] = embedding
-                self.persons[pid]['face_confidence'] = face_conf
-                self.persons[pid]['person_similarity'] = person_sim
-                self.persons[pid]['bbox'] = bbox
-                self.persons[pid]['distance'] = self.calc_distance(bbox)
-                self.persons[pid]['last_seen'] = self.frame_count
-            
+                self.persons[pid].update({
+                    'face_embedding': embedding, 'face_confidence': face_conf,
+                    'person_similarity': person_sim, 'bbox': bbox,
+                    'distance': self.calc_distance(bbox), 'last_seen': self.frame_count
+                })
             matched.add(pid)
         
         return matched
     
     def assign_guest_name(self, person_id, guest_name, frame):
-        """分配客人名字并分析外貌特征"""
-        if person_id in self.persons:
-            if person_id in self.guest_assigned:
-                print(f"⚠️ Person {person_id} 已被分配")
-                return
-            if guest_name in self.target_guests:
-                print(f"⚠️ {guest_name} 已绑定")
-                return
+        if person_id in self.guest_assigned or guest_name in self.target_guests:
+            print(f"⚠️ 已分配或已绑定")
+            return
+        
+        info = self.persons.get(person_id)
+        if not info:
+            return
+        
+        emb = info['face_embedding']
+        if emb is None:
+            print("❌ 无人脸特征，请重试")
+            return
+        
+        x1, y1, x2, y2 = info['bbox']
+        crop = frame[y1:y2, x1:x2]
+        
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+                cv2.imwrite(tmp.name, crop)
+                features = analyze_person_features(tmp.name)
+                os.unlink(tmp.name)
             
-            embedding = self.persons[person_id]['face_embedding']
+            # ★ 存储多个embedding样本，提高鲁棒性
+            self.guest_embeddings[guest_name] = [emb]
+            self.target_guests[guest_name] = person_id
+            self.guest_assigned.add(person_id)
+            self.guest_features[guest_name] = features
+            self.persons[person_id]['features'] = features
+            self.persons[person_id]['name'] = guest_name
             
-            if embedding is not None:
-                # ★ 裁剪bbox区域
-                bbox = self.persons[person_id]['bbox']
-                x1, y1, x2, y2 = bbox
-                crop = frame[y1:y2, x1:x2]
-                
-                # ★ 保存临时图像
-                try:
-                    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
-                        cv2.imwrite(tmp.name, crop)
-                        # ★ 调用大模型（会显示推理中）
-                        features = analyze_person_features(tmp.name)
-                        os.unlink(tmp.name)
-                    
-                    self.guest_embeddings[guest_name] = [embedding]
-                    self.persons[person_id]['name'] = guest_name
-                    self.persons[person_id]['features'] = features
-                    self.target_guests[guest_name] = person_id
-                    self.guest_assigned.add(person_id)
-                    self.guest_features[guest_name] = features
-                    
-                    print(f"✓ {guest_name.upper()} 已绑定 (ID {person_id})")
-                    print(f"  外貌特征: {json.dumps(features, ensure_ascii=False)}")
-                    save_path = "guest_features.json"
-                    with open(save_path, "w", encoding="utf-8") as f:
-                        json.dump(self.guest_features, f, ensure_ascii=False, indent=2)
-                    print(f"✅ 特征已保存到: {save_path}")                
-                    if "jack" in self.guest_features and "tom" in self.guest_features:
-                        print("\n==== 两位客人已全部识别完成 ====")              
-                        jack_feat = self.guest_features["jack"]
-                        tom_feat = self.guest_features["tom"]
-                    
-                        jack_desc = self.describe_guest("jack")
-                        tom_desc = self.describe_guest("tom")
-                    
-                    # 向第二个客人介绍第一个
-                        print(f"\n【对 Tom 介绍】：{jack_desc}")
-                    # 向第一个客人介绍第二个
-                        print(f"【对 Jack 介绍】：{tom_desc}")
-
-                    
-                except Exception as e:
-                    print(f"❗ 绑定客人失败: {e}")
+            print(f"✓ {guest_name.upper()} 已绑定 (相似度阈值: 0.55)")
+            print(f"特征: {json.dumps(features, ensure_ascii=False)}")
+            
+            with open("guest_features.json", "w", encoding="utf-8") as f:
+                json.dump(self.guest_features, f, ensure_ascii=False, indent=2)
+        
+        except Exception as e:
+            print(f"❗ 绑定失败: {e}")
 
     
     def get_closest_unassigned_person(self, matched_ids):
-        """获取最近的未分配人物"""
         unassigned = [pid for pid in matched_ids if pid not in self.guest_assigned]
-        if not unassigned:
-            return None
-        return min(unassigned, key=lambda pid: self.persons[pid]['distance'])
+        return min(unassigned, key=lambda pid: self.persons[pid]['distance']) if unassigned else None
     
     def get_person_info(self, person_id):
-        """获取人物信息"""
-        if person_id in self.persons:
-            return self.persons[person_id]
-        return None
+        return self.persons.get(person_id)
     
     def describe_guest(self, guest_name):
-        """返回客人外貌描述"""
-        if guest_name in self.guest_features:
-            features = self.guest_features[guest_name]
-            desc = f"{features.get('性别', '未知')}，{features.get('头发颜色', '未知')}头发，" \
-                   f"穿着{features.get('衣服颜色', '未知')}衣服"
-            if features.get('眼镜') == '佩戴眼镜':
-                desc += "，戴眼镜"
-            if features.get('帽子') == '戴帽子':
-                desc += "，戴帽子"
-            return desc
-        return "未知"
-
-feature_extraction = RoboCupReIDTracker(debug=False)
-
-def main():
-    print("\n=== RoboCup@Home ReID + 大模型 ===")
-    print("初始化中...\n")
-    
-    # 初始化YOLOv8
-    model = YOLO('yolov8n.pt')
-    
-    # 打开摄像头
-    cap = cv2.VideoCapture(10)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    
-    if not cap.isOpened():
-        print("❗ 无法打开摄像头 ID 10")
+        if guest_name not in self.guest_features:
+            return "未绑定"
+        f = self.guest_features[guest_name]
+        desc = f"{f.get('性别')},{f.get('头发颜色')}头发,穿{f.get('衣服颜色')}"
+        if f.get('眼镜') == '佩戴眼镜':
+            desc += ",戴眼镜"
+        if f.get('帽子') == '戴帽子':
+            desc += ",戴帽子"
+        return desc
+def smooth_gaze_tracking(head_controller, tracker, frame, model, cap, guest_name, axis='horizontal'):
+    """平滑目光追踪 - 让人物移动到画面中心"""
+    info = tracker.get_person_info(tracker.target_guests.get(guest_name))
+    if not info:
+        print(f"❌ {guest_name}未绑定")
         return
     
+    print(f"\n=== 平滑转向{guest_name}（{axis}） ===")
+    
+    current_pos = 0
+    max_iter = 20  # ★ 增加迭代次数
+    step = 0x300
+    threshold = 15  # ★ 减小阈值到15px，更精确
+    
+    for iteration in range(max_iter):
+        ctrl = get_person_direction(info['bbox'], frame.shape[1], frame.shape[0])
+        
+        # ★ 根据轴选择偏移量
+        if axis == 'horizontal':
+            offset = ctrl['offset_x']
+        else:
+            offset = ctrl['offset_y']
+        
+        print(f"迭代{iteration+1}: 偏移{offset:.0f}px")
+        
+        if abs(offset) < threshold:
+            print(f"✓ 转向完成，误差{abs(offset):.0f}px < {threshold}px")
+            break
+        
+        try:
+            if abs(offset) > 150:
+                current_step = step * 2
+            elif abs(offset) > 80:
+                current_step = step
+            else:
+                current_step = step // 2
+            
+            # 反向：人在右边/下边，头向左/上转
+            if offset < -threshold:
+                print(f"  → 向正方向转 {current_step:X}")
+                current_pos += current_step
+            elif offset > threshold:
+                print(f"  → 向负方向转 {current_step:X}")
+                current_pos -= current_step
+            
+            if axis == 'horizontal':
+                head_controller.rotate_horizontal(current_pos)
+            else:
+                head_controller.rotate_vertical(current_pos)
+            
+            print(f"  当前位置: {current_pos:X}")
+            
+            import time
+            time.sleep(0.2)
+            
+            ret, frame = cap.read()
+            if ret:
+                dets = model(frame, conf=0.5, classes=0, verbose=False)
+                detections = [{'bbox': tuple(map(int, b.xyxy[0]))} for r in dets for b in r.boxes]
+                matched = tracker.update(detections, frame)
+                info = tracker.get_person_info(tracker.target_guests.get(guest_name))
+                if not info:
+                    print("❌ 人物丢失")
+                    break
+        
+        except Exception as e:
+            print(f"  ❌ 转向失败: {e}")
+            break
+    
+    print(f"✓ {guest_name}转向完成\n")
+
+def continuous_gaze_tracking(head_controller, tracker, frame, model, cap, target, duration=30):
+    """持续目光追踪 - 自动跟随人物移动"""
+    import time
+    start_time = time.time()
+    
+    current_pos_h = 0
+    current_pos_v = 0
+    
+    threshold = 25
+    step = 0x250
+    
+    print(f"🎯 追踪 {target.upper()}，持续 {duration} 秒（按ESC提前退出）...")
+    
+    frame_count = 0
+    while time.time() - start_time < duration:
+        info = tracker.get_person_info(tracker.target_guests.get(target))
+        if not info:
+            print("⚠️ 人物丢失，等待重新检测...")
+            time.sleep(0.1)
+            continue
+        
+        ctrl = get_person_direction(info['bbox'], frame.shape[1], frame.shape[0])
+        offset_x = ctrl['offset_x']
+        offset_y = ctrl['offset_y']
+        
+        adjusted = False
+        
+        if abs(offset_x) > threshold:
+            if offset_x > 0:
+                current_pos_h -= step
+            else:
+                current_pos_h += step
+            head_controller.rotate_horizontal(current_pos_h)
+            adjusted = True
+            print(f"  ↔ 水平调整: {offset_x:.0f}px")
+        
+        if abs(offset_y) > threshold:
+            if offset_y > 0:
+                current_pos_v -= step
+            else:
+                current_pos_v += step
+            head_controller.rotate_vertical(current_pos_v)
+            adjusted = True
+            print(f"  ↕ 竖直调整: {offset_y:.0f}px")
+        
+        ret, frame = cap.read()
+        if ret:
+            dets = model(frame, conf=0.5, classes=0, verbose=False)
+            detections = [{'bbox': tuple(map(int, b.xyxy[0]))} for r in dets for b in r.boxes]
+            matched = tracker.update(detections, frame)
+            
+            # 显示画面
+            for pid in matched:
+                info_display = tracker.get_person_info(pid)
+                if info_display:
+                    x1, y1, x2, y2 = info_display['bbox']
+                    name = info_display['name'] or f"ID{pid}"
+                    col = (0, 255, 0) if info_display['name'] else (0, 165, 255)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), col, 2)
+                    cv2.putText(frame, name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, col, 2)
+                    
+                    # ★ 显示偏移信息
+                    if info_display['name'] == target:
+                        cv2.putText(frame, f"Offset: X={offset_x:.0f} Y={offset_y:.0f}", 
+                                   (x1, y2 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+            
+            # ★ 显示追踪状态
+            elapsed = int(time.time() - start_time)
+            cv2.putText(frame, f"TRACKING: {target.upper()} ({elapsed}s/{duration}s)", 
+                       (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            cv2.imshow('RoboCup@Home', frame)
+            
+            # ★ 按ESC退出
+            key = cv2.waitKey(1) & 0xFF
+            if key == 27:  # ESC
+                print("\n⏹ 用户中断追踪")
+                break
+        
+        time.sleep(0.1 if adjusted else 0.05)
+    
+    print(f"✓ {target.upper()} 追踪完成")
+
+
+def main():
+    print("\n=== RoboCup@Home ReID ===\n")
+    
+    model = YOLO('yolov8n.pt')
+    cap = cv2.VideoCapture(10)
+    
+    # ★ 改进摄像头设置
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # 提高分辨率
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)  # 开启自动对焦
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)  # 自动曝光
+    
+    if not cap.isOpened():
+        print("❗ 无法打开摄像头")
+        return
+    
+    # 等待摄像头稳定
+    import time
+    time.sleep(1)
+    
     tracker = RoboCupReIDTracker(debug=False)
-    seat_manager = SeatManager(debug=False)  # ★ 初始化座位管理器
-    # ★ 等导航组提供座位配置后加载
-    # seats_config = [...]
-    # seat_manager.load_seats(seats_config)
+    seat_manager = SeatManager(debug=False)
+    head_controller = HeadCameraController(port='/dev/ttyS1')
     
-    print("按 '1' 标记为 Jack")
-    print("按 '2' 标记为 Tom")
-    print("按 'd' 查看客人外貌描述")
-    print("按 'q' 退出\n")
+    try:
+        head_controller.enable()
+        print("✓ 头部已激活")
+    except Exception as e:
+        print(f"⚠️ 头部初始化失败: {e}")
     
-    detections = []
+    print("快捷键: 1=Jack  2=Tom  d=描述  i=看Tom  j=看Jack  h=回中  q=退出\n")
+    
+    detections = []  # ★ 初始化
     
     while True:
         ret, frame = cap.read()
         if not ret:
-            print("❗ 读取视频帧失败")
             break
         
-        # 每2帧检测一次（加速）
         if tracker.frame_count % 2 == 0:
-            results = model(frame, conf=0.5, classes=0, verbose=False)
-            detections = []
-            for result in results:
-                for box in result.boxes:
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    detections.append({'bbox': (x1, y1, x2, y2)})
+            dets = model(frame, conf=0.5, classes=0, verbose=False)
+            detections = [{'bbox': tuple(map(int, b.xyxy[0]))} for r in dets for b in r.boxes]
         
-        # 更新追踪
         matched = tracker.update(detections, frame)
-           # ★ 更新座位状态（同一个frame）
-        person_bboxes = [det['bbox'] for det in detections]
-        seat_manager.update_seat_status(frame, person_bboxes, use_pose=False)
-        # ★ 绘制座位
-        frame = seat_manager.draw_seats(frame)
-        # 绘制追踪结果
+        
         for pid in matched:
             info = tracker.get_person_info(pid)
             if info:
                 x1, y1, x2, y2 = info['bbox']
-                name = info['name'] if info['name'] else f"ID {pid}"
-                color = (0, 255, 0) if info['name'] else (0, 165, 255)
+                name = info['name'] or f"ID{pid}"
+                col = (0, 255, 0) if info['name'] else (0, 165, 255)
                 
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(frame, name, (x1, y1 - 10), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                # ★ 显示相似度
+                if info['name']:
+                    sim_text = f"{info.get('guest_similarity', 0):.2f}"
+                    cv2.putText(frame, sim_text, (x1, y2 + 20), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 2)
+                
+                cv2.rectangle(frame, (x1, y1), (x2, y2), col, 2)
+                cv2.putText(frame, name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, col, 2)
         
-        # 显示帧数
-        cv2.putText(frame, f"Frame: {tracker.frame_count}", (10, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(frame, f"Frame:{tracker.frame_count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.imshow('RoboCup@Home', frame)
         
-        cv2.imshow('RoboCup@Home ReID', frame)
-        
-        # 键盘输入
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             break
         elif key == ord('1'):
             if matched:
-                closest_pid = tracker.get_closest_unassigned_person(matched)
-                if closest_pid is not None:
-                    print(f"→ 标记 Person {closest_pid} 为 Jack...")
-                    tracker.assign_guest_name(closest_pid, 'jack', frame)
+                pid = tracker.get_closest_unassigned_person(matched)
+                if pid is not None:
+                    tracker.assign_guest_name(pid, 'jack', frame)
                 else:
-                    print("⚠️ 没有未分配的人物")
+                    print("⚠️ 无未分配人物")
             else:
-                print("⚠️ 没有检测到人物")
+                print("⚠️ 无检测人物")
         elif key == ord('2'):
             if matched:
-                closest_pid = tracker.get_closest_unassigned_person(matched)
-                if closest_pid is not None:
-                    print(f"→ 标记 Person {closest_pid} 为 Tom...")
-                    tracker.assign_guest_name(closest_pid, 'tom', frame)
+                pid = tracker.get_closest_unassigned_person(matched)
+                if pid is not None:
+                    tracker.assign_guest_name(pid, 'tom', frame)
                 else:
-                    print("⚠️ 没有未分配的人物")
+                    print("⚠️ 无未分配人物")
             else:
-                print("⚠️ 没有检测到人物")
-        elif key == ord('s'):  # ★ 按's'查看座位状态
-            print("\n--- 座位状态 ---")
-            for seat_id, status in seat_manager.seat_status.items():
-                print(f"座位{seat_id}: {'占用' if status['occupied'] else '空'} (置信度{status['confidence']:.2f})")
-            empty = seat_manager.get_empty_seats()
-            print(f"空座位: {[s['id'] for s in empty]}")
+                print("⚠️ 无检测人物")
         elif key == ord('d'):
-            print("\n--- 客人外貌描述 ---")
-            for name in ['jack', 'tom']:
-                desc = tracker.describe_guest(name)
-                if desc != "未知":
-                    print(f"{name.upper()}: {desc}")
+            print(f"Jack: {tracker.describe_guest('jack')}")
+            print(f"Tom: {tracker.describe_guest('tom')}\n")
+        elif key == ord('i'):
+            smooth_gaze_tracking(head_controller, tracker, frame, model, cap, 'tom', axis='horizontal')
+            smooth_gaze_tracking(head_controller, tracker, frame, model, cap, 'tom', axis='vertical')
+        elif key == ord('j'):
+            smooth_gaze_tracking(head_controller, tracker, frame, model, cap, 'jack', axis='horizontal')
+            smooth_gaze_tracking(head_controller, tracker, frame, model, cap, 'jack', axis='vertical')
+        elif key == ord('t'):  # ★ 新增：测试持续追踪
+            if matched:
+                pid = tracker.get_closest_unassigned_person(matched)
+                if pid is None and tracker.target_guests:
+            # 如果没有未分配的，就用已绑定的第一个
+                   target_name = list(tracker.target_guests.keys())[0]
+                   print(f"\n🎯 开始持续追踪 {target_name.upper()}，按'q'停止")
+                   continuous_gaze_tracking(head_controller, tracker, frame, model, cap, target_name, duration=30)
                 else:
-                    print(f"{name.upper()}: 未绑定")
-            print()
+                   print("⚠️ 请先绑定一个人")
+            else:
+                print("⚠️ 无检测人物")
+
+
+        elif key == ord('h'):
+            try:
+                print("正在回中...")
+                head_controller.home()
+                print("✓ 头部回中成功")
+            except Exception as e:
+                print(f"❌ 头部回中失败: {e}")
     
+    try:
+        head_controller.close()
+    except:
+        pass
     cap.release()
     cv2.destroyAllWindows()
-    print("\n程序已退出")
+
 
 
 if __name__ == '__main__':
