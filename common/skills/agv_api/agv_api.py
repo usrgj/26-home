@@ -124,13 +124,13 @@ class AGVApi:
         """查询 SLAM 状态"""
         return self._query_data(_STATUS, "0401")
     
-    def get_current_station(self) -> str | None:
+    def get_current_station(self) -> str :
         """离机器人最近站点的 id（该判断比较严格，机器人必须很靠近某一个站点，
         这个距离可以通过参数配置中的 CurrentPointDist修改，默认为 0.3m。
         如果机器人与所有站点的距离大于这个距离，
         则这个字段为空字符。查询当前所在站点""" 
         data = self._query_data(_STATUS, "03EC")
-        return data.get("current_station") if data else None
+        return data.get("current_station") if data else ""
 
     # ═════════════════════════════════════════════════════════════════════
     #  运动控制

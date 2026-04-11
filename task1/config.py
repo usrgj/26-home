@@ -17,14 +17,15 @@ STATION_SEAT3 = "seat3"
 
 # ── 座位状态 初始设为未知  ─────────────────────────────────────────────────
 SEATS = [
-    {"id": "seat_1", "occupied": None, "box1": [0, 0, 0, 0], "box2": [0, 0, 0, 0]},  # box1 是在第一个观察位置看到的座位框，box2 是在第二个观察位置看到的座位框，如果某个位置看不到这个座位就设为 [0,0,0,0]
-    {"id": "seat_2", "occupied": None, "box1": [0, 0, 0, 0], "box2": [0, 0, 0, 0]},
+    {"id": "seat_1", "occupied": None, "box1": [0, 190, 165, 450], "box2": [0, 0, 0, 0]},  # box1 是在第一个观察位置看到的座位框，box2 是在第二个观察位置看到的座位框，如果某个位置看不到这个座位就设为 [0,0,0,0]
+    {"id": "seat_2", "occupied": None, "box1": [515, 326, 637, 478], "box2": [0, 0, 0, 0]},
     {"id": "seat_3", "occupied": None, "box1": [0, 0, 0, 0], "box2": [0, 0, 0, 0]},
-    {"id": "seat_4", "occupied": None, "box1": [0, 0, 0, 0], "box2": [0, 0, 0, 0]},
+    {"id": "seat_4", "occupied": None, "box1": [236, 126, 308, 147], "box2": [0, 0, 0, 0]},
     {"id": "seat_5", "occupied": None, "box1": [0, 0, 0, 0], "box2": [0, 0, 0, 0]},
 ]
+PRE_OCCUPIED_SEATS = []
 
-# 位置对应的站点，因为不是每个位置都需要打一个站点，所以单独维护一个映射,角度是弧度
+# 位置对应的导航站点；此处 angle 仍沿用导航接口既有配置语义
 SEATS_MAPPING = [
     {"seat_id": "seat_1", "nav_id": "seat_nav1", "angle": 0},
     {"seat_id": "seat_2", "nav_id": "seat_nav1", "angle": 0},
@@ -32,6 +33,35 @@ SEATS_MAPPING = [
     {"seat_id": "seat_4", "nav_id": "seat_nav2", "angle": 0},
     {"seat_id": "seat_5", "nav_id": "seat_nav3", "angle": 0},
 ]
+
+# 介绍阶段使用的朝向配置：
+# 键1 = 当前所在导航站点
+# 键2 = 需要看向的目标座位
+# 值 = 底盘原地转向的目标角度（度）
+INTRO_LOOK_ANGLES_DEG = {
+    "seat_nav1": {
+        "seat_1": 0.0,
+        "seat_2": 0.0,
+        "seat_3": 0.0,
+        "seat_4": 0.0,
+        "seat_5": 0.0,
+    },
+    "seat_nav2": {
+        "seat_1": 0.0,
+        "seat_2": 0.0,
+        "seat_3": 0.0,
+        "seat_4": 0.0,
+        "seat_5": 0.0,
+    },
+    "seat_nav3": {
+        "seat_1": 0.0,
+        "seat_2": 0.0,
+        "seat_3": 0.0,
+        "seat_4": 0.0,
+        "seat_5": 0.0,
+    },
+}
+
 
 
 # ── 超时（秒） ───────────────────────────────────────────────────────────

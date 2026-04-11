@@ -47,4 +47,6 @@ class InitAndWait(State):
 
         input("[状态0] 硬件就绪，按 Enter 开始比赛...")
 
+        time.sleep(2)
+
         return "receive_guest"

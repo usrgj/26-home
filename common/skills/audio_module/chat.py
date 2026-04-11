@@ -15,10 +15,13 @@ from pathlib import Path
 # 解决中文乱码
 sys.stdout.reconfigure(encoding='utf-8')
 
-# ---------- 路径配置（动态获取，方便移植） ----------
-BASE_DIR = Path(__file__).resolve().parent
-AUDIO_DIR = BASE_DIR / "audio_cache"
-CACHE_DIR = AUDIO_DIR / "cache"
+# 创建 FastAPI 实例（关键！）
+app = FastAPI()
+
+VOICE = "zh-CN-XiaoxiaoNeural"
+BASE_DIR = "/home/luo/桌面/api"          # 请根据实际项目路径调整
+AUDIO_DIR = os.path.join(BASE_DIR, "audio_cache")
+CACHE_DIR = os.path.join(AUDIO_DIR, "cache")
 MAX_FILES = 200
 
 # 创建目录

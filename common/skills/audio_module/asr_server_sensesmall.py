@@ -5,15 +5,17 @@ from funasr import AutoModel
 import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
-CACHE_DIR = BASE_DIR / "modelscope_cache"
-CACHE_DIR.mkdir(exist_ok=True)
+# 获取项目根目录（向上4级）
+PROJECT_ROOT = Path(__file__).resolve().parents[3]  # 因为当前文件在 .../common/skills/audio_module/
+CACHE_DIR = PROJECT_ROOT / "models" / "modelscope_cache"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 os.environ["MODELSCOPE_CACHE"] = str(CACHE_DIR)
+print(PROJECT_ROOT)
 
 # 加载SenseVoiceSmall模型
 print("正在加载SenseVoiceSmall模型...")
 model = AutoModel(
-    model="models/SenseVoiceSmall",
+    model="iic/SenseVoiceSmall",
     trust_remote_code=True,
     vad_model="fsmn-vad",  # 可选，启用VAD提高准确率
     device="cuda"

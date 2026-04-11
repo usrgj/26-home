@@ -29,10 +29,8 @@ import select
 # ------------------ Doorbell detection (Local YAMNet) ------------------
 import tensorflow as tf
 
-# 使用相对路径：模型位于本文件所在目录下的 yamnet 文件夹
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-YAMNET_MODEL_PATH = os.path.join(CURRENT_DIR, "yamnet")
-
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+YAMNET_MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "yamnet")
 # ------------------ Configuration ------------------
 ASR_URL = "http://127.0.0.1:8001/api/speech_recognition"
 TTS_URL = "http://127.0.0.1:8002/v1/audio/speech"

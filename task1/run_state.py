@@ -27,7 +27,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 
 # 向上跳三级回到真正的根目录 (26-home)
 # tool -> arm_folding -> task3 -> 26-home
-root_dir = os.path.abspath(os.path.join(current_dir, "../../.."))
+root_dir = os.path.abspath(os.path.join(current_dir, "../"))
 
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
