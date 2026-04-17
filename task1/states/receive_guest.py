@@ -33,7 +33,7 @@ from common.skills.head_control import pan_tilt
 from common.state_machine import State
 from task1 import config
 from task1.behaviors.vision.client import analyze_person_features
-
+from task1.behaviors.vision.gaze_api import (start_gaze_tracking_nearest_person,detect_persons)
 log = logging.getLogger("task1.receive_guest")
 
 _DEFAULT_DETECTION_CONF = 0.35
@@ -92,15 +92,7 @@ class ReceiveGuest(State):
 
             # TODO 开门
             # 注视
-            gaze_stop_event = threading.Event()
-            gaze_thread = threading.Thread(
-                target=_gaze_loop,
-                args=(gaze_stop_event, model, self._cam_head, pan_tilt),
-                name=f"gaze_guest_{guest_index}",
-                daemon=True,
-            )
-            gaze_thread.start()
-
+            gaze_thread, gaze_stop_event = start_gaze_tracking_nearest_person(pan_tilt, self._cam_head, duration=30)
             # 询问姓名和喜爱饮品，同时在后台提取视觉特征
             try:
                 guest.name = _ask_guest_name()
@@ -115,7 +107,8 @@ class ReceiveGuest(State):
                 guest.favorite_drink = _ask_guest_drink()
             finally:
                 # 结束注视
-                _stop_gaze_thread(gaze_stop_event, gaze_thread) 
+                gaze_stop_event.set()
+                gaze_thread.join()
 
             # 导航到空位置
             seat_id = ctx.find_free_seat()
@@ -173,7 +166,7 @@ class ReceiveGuest(State):
 
 def _ask_guest_name() -> str:
     """通过语音询问并提取客人姓名。"""
-    prompt = "你好，欢迎来到我家。请问你叫什么?"
+    prompt = "hello，welcome to my home,what is your name?"
 
     for attempt in range(config.ASK_RETRIES):
         voice_assistant.speak(prompt)
@@ -191,7 +184,7 @@ def _ask_guest_name() -> str:
 
 def _ask_guest_drink() -> str:
     """通过语音询问并提取客人喜爱饮品。"""
-    prompt = "你要喝点什么？"
+    prompt = "what is your favourite drink?"
 
     for attempt in range(config.ASK_RETRIES):
         voice_assistant.speak(prompt)

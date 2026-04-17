@@ -1,104 +1,74 @@
-# -*- coding: utf-8 -*-
-from fastapi import FastAPI, Body, Response
-import uvicorn
-import sys
-import os
-import asyncio
+# chat.py
 import edge_tts
-from datetime import datetime
-import re
-import glob
+import uvicorn
+from fastapi import FastAPI, Body, Response
+import os
 import hashlib
 import shutil
+import glob
+from datetime import datetime
+import sys
 from pathlib import Path
 
-# 解决中文乱码
-sys.stdout.reconfigure(encoding='utf-8')
+# 将项目根目录添加到 sys.path，以便导入 common.config
+PROJECT_ROOT = Path(__file__).resolve().parents[3]  # 向上4级到 26-home
+sys.path.insert(0, str(PROJECT_ROOT))
 
-# 创建 FastAPI 实例（关键！）
+from common.config import LANGUAGE
+
 app = FastAPI()
 
-VOICE = "zh-CN-XiaoxiaoNeural"
-BASE_DIR = "/home/luo/桌面/api"          # 请根据实际项目路径调整
+# 根据全局配置选择默认语音
+if LANGUAGE == "en":
+    VOICE_DEFAULT = "en-US-JennyNeural"   # 英文女声
+else:
+    VOICE_DEFAULT = "zh-CN-XiaoxiaoNeural" # 中文女声
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUDIO_DIR = os.path.join(BASE_DIR, "audio_cache")
-CACHE_DIR = os.path.join(AUDIO_DIR, "cache")
-MAX_FILES = 200
+CACHE_DIR = AUDIO_DIR   # 直接使用 AUDIO_DIR，不再使用子目录
+os.makedirs(AUDIO_DIR, exist_ok=True)
 
-# 创建目录
-for d in [AUDIO_DIR, CACHE_DIR]:
-    d.mkdir(exist_ok=True)
-
-VOICE = "en-US-JennyNeural"
-
-# ---------- 辅助函数 ----------
 def speed_to_rate(speed):
     percent = int((speed - 1.0) * 100)
     return f"{percent:+d}%"
 
-def sanitize_filename(text):
-    text = re.sub(r'[^\w\u4e00-\u9fff]', '', text)
-    return text[:20]
-
-def cleanup_old_files(directory: Path, max_files: int):
-    """清理旧音频文件，保留最近 max_files 个"""
-    files = list(directory.glob("*.mp3"))
-    if len(files) <= max_files:
-        return
-    files.sort(key=lambda f: f.stat().st_mtime)
-    for f in files[:-max_files]:
-        f.unlink()
-        print(f"清理旧文件: {f}")
-
-# ---------- FastAPI 应用 ----------
-app = FastAPI()
-
 @app.post("/v1/audio/speech")
 async def speech(
-        model: str = Body("tts-1", embed=True),
-        input: str = Body(..., embed=True),
-        voice: str = Body("alloy", embed=True),
-        speed: float = Body(1.0, embed=True)
+    model: str = Body("tts-1", embed=True),
+    input: str = Body(..., embed=True),
+    voice: str = Body(VOICE_DEFAULT, embed=True),
+    speed: float = Body(1.0, embed=True)
 ):
-    # 生成缓存 key
-    key = hashlib.md5(f"{input}_{speed}".encode()).hexdigest()
-    cache_path = CACHE_DIR / f"{key}.mp3"
+    # 生成缓存 key（包含语言信息）
+    key = hashlib.md5(f"{input}_{speed}_{voice}".encode()).hexdigest()
+    cache_path = os.path.join(CACHE_DIR, f"{key}.mp3")
+    if os.path.exists(cache_path):
+        return Response(content=open(cache_path, "rb").read(), media_type="audio/mpeg")
 
-    if cache_path.exists():
-        print(f"使用缓存: {cache_path}")
-        return Response(content=cache_path.read_bytes(), media_type="audio/mpeg")
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    prefix = sanitize_filename(input)
-    file_name = f"{timestamp}_{prefix}.mp3"
-    audio_path = AUDIO_DIR / file_name
-
-    rate_str = speed_to_rate(speed)
+    # 使用传入的 voice 参数（若未传则用默认语音）
+    communicate = edge_tts.Communicate(input, voice, rate=speed_to_rate(speed))
+    audio_path = os.path.join(AUDIO_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp3")
     try:
-        communicate = edge_tts.Communicate(input, VOICE, rate=rate_str)
-        await communicate.save(str(audio_path))  # edge_tts 需要字符串路径
+        await communicate.save(audio_path)
     except Exception as e:
-        print(f"音频生成失败: {e}")
-        return {"error": str(e)}, 500
+        return Response(content=f"TTS failed: {e}", status_code=500)
+    
+    # 复制到缓存
+    shutil.copy2(audio_path, cache_path)
+    # 可选：清理旧文件（保留最近200个）
+    files = glob.glob(os.path.join(AUDIO_DIR, "*.mp3"))
+    if len(files) > 200:
+        files.sort(key=os.path.getmtime)
+        for f in files[:-200]:
+            os.remove(f)
+    files = glob.glob(os.path.join(CACHE_DIR, "*.mp3"))
+    if len(files) > 200:
+        files.sort(key=os.path.getmtime)
+        for f in files[:-200]:
+            os.remove(f)
+    
+    return Response(content=open(audio_path, "rb").read(), media_type="audio/mpeg")
 
-    # 复制到缓存目录
-    shutil.copy2(str(audio_path), str(cache_path))
-
-    # 清理旧文件
-    cleanup_old_files(AUDIO_DIR, MAX_FILES)
-    cleanup_old_files(CACHE_DIR, MAX_FILES // 2)
-
-    return Response(content=audio_path.read_bytes(), media_type="audio/mpeg")
-
-@app.get("/health")
-async def health_check():
-    return {"status": "success", "port": "8002", "module": "Edge-TTS with Cache"}
-
-# ---------- 启动入口 ----------
 if __name__ == "__main__":
-    uvicorn.run(
-        app=app,
-        host="0.0.0.0",
-        port=8002,
-        log_level="info",
-        access_log=False
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8002)
