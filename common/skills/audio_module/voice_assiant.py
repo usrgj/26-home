@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-English Voice Assistant with Doorbell Detection (Local YAMNet)
-Supports manual Enter key fallback when no doorbell detected.
+Multi-language Voice Assistant with Doorbell Detection (Local YAMNet)
+Supports manual Enter key fallback.
+Language controlled by common.config.LANGUAGE ('en' or 'zh').
 """
 
 import time
@@ -11,7 +12,6 @@ import threading
 import collections
 import requests
 import io
-import pygame
 import numpy as np
 import noisereduce as nr
 import os
@@ -26,11 +26,16 @@ import spacy
 import sys
 import select
 
+# ------------------ Import language config ------------------
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, PROJECT_ROOT)
+from common.config import LANGUAGE
+
 # ------------------ Doorbell detection (Local YAMNet) ------------------
 import tensorflow as tf
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 YAMNET_MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "yamnet")
+
 # ------------------ Configuration ------------------
 ASR_URL = "http://127.0.0.1:8001/api/speech_recognition"
 TTS_URL = "http://127.0.0.1:8002/v1/audio/speech"
@@ -46,66 +51,113 @@ MAX_RECORD_DURATION_MS = 10000
 RING_BUFFER_MAXLEN = int(1000 / FRAME_DURATION_MS)
 MAX_LOW_ENERGY_FRAMES = 30
 
-TTS_CACHE_DIR = "tts_cache"
+# 缓存目录改为当前文件所在目录下的 audio_cache
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+TTS_CACHE_DIR = os.path.join(CURRENT_DIR, "audio_cache")
 os.makedirs(TTS_CACHE_DIR, exist_ok=True)
 
-OFFLINE_TTS_CMD = "pico2wave"
-OFFLINE_TTS_BACKUP = "espeak"
+# 多语言文本和列表
+if LANGUAGE == "en":
+    COMMON_DRINKS = [
+        "coke", "coca cola", "pepsi", "sprite", "fanta", "7up", "juice", "orange juice",
+        "apple juice", "milk", "yogurt", "water", "mineral water", "tea", "black tea",
+        "green tea", "oolong tea", "coffee", "latte", "cappuccino", "beer", "wine",
+        "red wine", "white wine", "cocktail", "lemonade", "soda"
+    ]
+    PROMPT_NAME = "Hello, welcome to the party! What's your name?"
+    PROMPT_NAME_RETRY = "Sorry, I didn't catch your name. Could you say it again?"
+    PROMPT_DRINK = "What's your favorite drink?"
+    PROMPT_DRINK_RETRY = "Sorry, I didn't catch that. What's your favorite drink?"
+    SEAT_GUIDE = "Please follow me, I will show you to your seat."
+    SEAT_HERE = "Please have a seat here."
+    NO_SEAT = "I'm sorry, there are no free seats available."
+    INTRO_TEMPLATE = "{listener}, let me introduce {subject}, who likes to drink {drink}."
+    INTRO_RESPONSE = "{listener}, this is {subject}, who likes to drink {drink}."
+    THANK_YOU = "Thank you both for coming! Enjoy the party."
+    FALLBACK_NAME = "Friend"
+    FALLBACK_DRINK = "Water"
+else:
+    COMMON_DRINKS = [
+        "可乐", "雪碧", "芬达", "美年达", "七喜", "果汁", "橙汁", "苹果汁",
+        "牛奶", "酸奶", "水", "矿泉水", "茶", "红茶", "绿茶", "乌龙茶",
+        "咖啡", "拿铁", "卡布奇诺", "啤酒", "红酒"
+    ]
+    PROMPT_NAME = "你好，欢迎来到派对！请问你叫什么名字？"
+    PROMPT_NAME_RETRY = "抱歉，我没听清你的名字，能再说一遍吗？"
+    PROMPT_DRINK = "你最喜欢的饮料是什么？"
+    PROMPT_DRINK_RETRY = "抱歉，我没听清你喜欢的饮料，能再说一次吗？"
+    SEAT_GUIDE = "请跟我来，我带您去座位。"
+    SEAT_HERE = "请坐这里。"
+    NO_SEAT = "抱歉，没有空座位了。"
+    INTRO_TEMPLATE = "{listener}，让我介绍一下{subject}，他/她喜欢喝{drink}。"
+    INTRO_RESPONSE = "{listener}，这位是{subject}，他/她喜欢喝{drink}。"
+    THANK_YOU = "感谢两位的光临，祝您愉快！"
+    FALLBACK_NAME = "朋友"
+    FALLBACK_DRINK = "水"
 
-COMMON_DRINKS_EN = [
-    "coke", "coca cola", "pepsi", "sprite", "fanta", "7up", "juice", "orange juice",
-    "apple juice", "milk", "yogurt", "water", "mineral water", "tea", "black tea",
-    "green tea", "oolong tea", "coffee", "latte", "cappuccino", "beer", "wine",
-    "red wine", "white wine", "cocktail", "lemonade", "soda"
-]
-
-# Load English NLP model
-try:
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    print("English model not found. Installing...")
-    subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
-    nlp = spacy.load("en_core_web_sm")
+# Load NLP model (only for English name extraction; Chinese uses regex)
+if LANGUAGE == "en":
+    try:
+        nlp = spacy.load("en_core_web_sm")
+    except OSError:
+        print("English model not found. Installing...")
+        subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
+        nlp = spacy.load("en_core_web_sm")
+else:
+    nlp = None  # Chinese name extraction uses regex only
 
 # ------------------ Helper Functions ------------------
 def extract_name(text):
+    """Extract person name from text (supports English and Chinese)."""
     if not text:
         return None
-    doc = nlp(text)
-    for ent in doc.ents:
-        if ent.label_ == "PERSON":
-            return ent.text
-    patterns = [
-        r"(?:my name is|i am|i'm|called?|name's?)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
-        r"^(?:i'?m?|this is)\s+([A-Z][a-z]+)",
-        r"call me\s+([A-Z][a-z]+)",
-    ]
+    if LANGUAGE == "en" and nlp:
+        doc = nlp(text)
+        for ent in doc.ents:
+            if ent.label_ == "PERSON":
+                return ent.text
+    # Common patterns for both languages
+    if LANGUAGE == "en":
+        patterns = [
+            r"(?:my name is|i am|i'm|called?|name's?)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+            r"^(?:i'?m?|this is)\s+([A-Z][a-z]+)",
+            r"call me\s+([A-Z][a-z]+)",
+        ]
+    else:
+        patterns = [
+            r'(?:我叫|我是|名字是|姓名是|本人叫|本人是)\s*([^\s，。、]+)',
+            r'叫\s*([^\s，。、]+)',
+            r'^([^\s，。、]{2,4})$',
+        ]
     for p in patterns:
         m = re.search(p, text, re.IGNORECASE)
         if m:
             return m.group(1)
-    words = re.findall(r'[A-Z][a-z]+', text)
+    words = re.findall(r'[\u4e00-\u9fff]+|[A-Z][a-z]+', text)
     return words[0] if words else None
 
 def extract_drink(text):
+    """Extract drink name from text using COMMON_DRINKS."""
     if not text:
         return None
     text_lower = text.lower()
-    for drink in COMMON_DRINKS_EN:
-        if drink in text_lower:
-            return drink.capitalize()
+    for drink in COMMON_DRINKS:
+        if drink.lower() in text_lower:
+            return drink
     return None
+
 def wait_for_doorbell_with_fallback(detector):
-    print("Waiting for doorbell... (Press Enter to manually trigger)")
+    print("Waiting for doorbell... (Press Enter to manually trigger)" if LANGUAGE == "en" else "等待门铃... (按 Enter 手动触发)")
     while True:
         if detector and detector.wait_for_doorbell(timeout=0.5):
-            print("Doorbell detected!")
+            print("Doorbell detected!" if LANGUAGE == "en" else "门铃检测到！")
             return True
         if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
             line = sys.stdin.readline()
             if line.strip() == "":
-                print("Manual trigger by Enter key.")
+                print("Manual trigger by Enter key." if LANGUAGE == "en" else "手动触发")
                 return True
+
 def ask_info(assistant, prompt, extract_func, retry_prompt, default=None, max_attempts=2):
     for attempt in range(max_attempts):
         assistant.speak(prompt if attempt == 0 else retry_prompt)
@@ -117,6 +169,7 @@ def ask_info(assistant, prompt, extract_func, retry_prompt, default=None, max_at
                 if info:
                     return info
     return default
+
 # ------------------ Doorbell Detector Class (Local Model) ------------------
 class DoorbellDetector:
     def __init__(self, threshold=0.5, chunk_seconds=1.0):
@@ -173,14 +226,14 @@ class DoorbellDetector:
                                   input=True, frames_per_buffer=chunk_size)
         self.thread = threading.Thread(target=self._listen, daemon=True)
         self.thread.start()
-        print("[Doorbell] Listening started...")
+        print("[Doorbell] Listening started..." if LANGUAGE == "en" else "[门铃] 开始监听...")
 
     def _listen(self):
         while self.running:
             try:
                 data = self.stream.read(int(RATE * self.chunk_seconds), exception_on_overflow=False)
                 if self._detect(data):
-                    print("[Doorbell] Doorbell detected!")
+                    print("[Doorbell] Doorbell detected!" if LANGUAGE == "en" else "[门铃] 检测到门铃！")
                     self.doorbell_detected.set()
                     time.sleep(2)
             except Exception as e:
@@ -196,12 +249,12 @@ class DoorbellDetector:
             self.stream.close()
         if self.p:
             self.p.terminate()
-        print("[Doorbell] Listening stopped.")
+        print("[Doorbell] Listening stopped." if LANGUAGE == "en" else "[门铃] 停止监听。")
 
     def wait_for_doorbell(self, timeout=None):
         return self.doorbell_detected.wait(timeout)
 
-# ------------------ VoiceAssistant Class ------------------
+# ------------------ VoiceAssistant Class (only online TTS, MP3 playback) ------------------
 class VoiceAssistant:
     def __init__(self):
         self.vad = webrtcvad.Vad(3)
@@ -209,49 +262,28 @@ class VoiceAssistant:
         self.stream = None
         self.noise_floor = 500.0
         self.energy_history = collections.deque(maxlen=50)
-        if not pygame.mixer.get_init():
-            pygame.mixer.init()
-        self.offline_tts_available = self._check_offline_tts()
+        self._mpg123_available = self._check_mpg123()
 
-    def _check_offline_tts(self):
+    def _check_mpg123(self):
         try:
-            subprocess.run([OFFLINE_TTS_CMD, "--help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1)
-            print("[Info] Offline TTS (pico2wave) available")
+            subprocess.run(['which', 'mpg123'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            print("[Info] mpg123 available")
             return True
         except:
-            try:
-                subprocess.run([OFFLINE_TTS_BACKUP, "--help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1)
-                print("[Info] Offline TTS (espeak) available")
-                return True
-            except:
-                print("[Warning] No offline TTS available")
-                return False
+            print("[Warning] mpg123 not found, please install: sudo apt install mpg123")
+            return False
 
-    def _offline_tts(self, text):
-        if not self.offline_tts_available:
+    def _play_mp3(self, file_path):
+        if not self._mpg123_available:
+            print("[播放错误] mpg123 not installed")
             return False
         try:
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-                temp_path = f.name
-            if subprocess.run([OFFLINE_TTS_CMD, "-l", "en-US", "-w", temp_path, text], check=False, timeout=5).returncode == 0:
-                pygame.mixer.music.load(temp_path)
-                pygame.mixer.music.play()
-                while pygame.mixer.music.get_busy():
-                    time.sleep(0.1)
-                time.sleep(0.3)
-                os.unlink(temp_path)
-                return True
-            if subprocess.run([OFFLINE_TTS_BACKUP, "-v", "en-us", "-w", temp_path, text], check=False, timeout=5).returncode == 0:
-                pygame.mixer.music.load(temp_path)
-                pygame.mixer.music.play()
-                while pygame.mixer.music.get_busy():
-                    time.sleep(0.1)
-                time.sleep(0.3)
-                os.unlink(temp_path)
-                return True
+            subprocess.run(['mpg123', '-q', file_path], check=True, timeout=10)
+            time.sleep(0.3)
+            return True
         except Exception as e:
-            print(f"[Offline TTS error] {e}")
-        return False
+            print(f"[播放异常] {e}")
+            return False
 
     def _get_cache_path(self, text):
         return os.path.join(TTS_CACHE_DIR, hashlib.md5(text.encode()).hexdigest() + ".mp3")
@@ -272,12 +304,9 @@ class VoiceAssistant:
 
     def preload_common_phrases(self):
         common_texts = [
-            "Hello, welcome to the party! What's your name?",
-            "Sorry, I didn't catch your name. Could you say it again?",
-            "What's your favorite drink?",
-            "Sorry, I didn't catch that. What's your favorite drink?",
-            "Great. Please have a seat.",
-            "Thank you both for coming! Enjoy the party."
+            PROMPT_NAME, PROMPT_NAME_RETRY,
+            PROMPT_DRINK, PROMPT_DRINK_RETRY,
+            SEAT_GUIDE, SEAT_HERE, THANK_YOU
         ]
         for text in common_texts:
             threading.Thread(target=self.preload_tts, args=(text,), daemon=True).start()
@@ -315,36 +344,27 @@ class VoiceAssistant:
         self.set_recording(2)
         cache_path = self._get_cache_path(text)
         if os.path.exists(cache_path):
-            try:
-                pygame.mixer.music.load(cache_path)
-                pygame.mixer.music.play()
-                while pygame.mixer.music.get_busy():
-                    time.sleep(0.1)
-                time.sleep(0.3)
+            if self._play_mp3(cache_path):
                 self.set_recording(3)
                 return
-            except:
-                pass
+            else:
+                os.remove(cache_path)
         try:
             resp = requests.post(TTS_URL, json={"model": "tts-1", "input": text, "voice": "alloy", "speed": 1.0}, timeout=5)
             if resp.status_code == 200:
                 with open(cache_path, 'wb') as f:
                     f.write(resp.content)
-                pygame.mixer.music.load(io.BytesIO(resp.content))
-                pygame.mixer.music.play()
-                while pygame.mixer.music.get_busy():
-                    time.sleep(0.1)
-                time.sleep(0.3)
-                self.set_recording(3)
-                return
-        except:
-            pass
-        if self._offline_tts(text):
-            self.set_recording(3)
-            return
+                if self._play_mp3(cache_path):
+                    self.set_recording(3)
+                    return
+            else:
+                print(f"[在线 TTS 错误] 状态码 {resp.status_code}")
+        except Exception as e:
+            print(f"[在线 TTS 异常] {e}")
         self.set_recording(3)
         print(f"[TTS Failed] Could not play: {text}")
 
+    # 降噪、录音、识别等方法保持不变（与语言无关）
     def update_noise_floor(self, frame_energy, is_speech_vad):
         if not is_speech_vad:
             self.energy_history.append(frame_energy)
@@ -403,9 +423,16 @@ class VoiceAssistant:
                 resp = requests.post(ASR_URL, files={"audio": ("audio.wav", af, "audio/wav")}, timeout=5)
                 if resp.status_code == 200:
                     text = resp.json().get('text', '').strip()
-                    text = re.sub(r'<\|[^>]+\|>', '', text)
-                    text = re.sub(r'\b(uh|um|ah|eh|er|mm|hmm)\b', '', text, flags=re.IGNORECASE)
-                    text = re.sub(r'[^\w\s\']', '', text)
+                    # 移除可能的特殊标记
+                    if LANGUAGE == "en":
+                        text = re.sub(r'<\|[^>]+\|>', '', text)
+                        text = re.sub(r'\b(uh|um|ah|eh|er|mm|hmm)\b', '', text, flags=re.IGNORECASE)
+                        text = re.sub(r'[^\w\s\']', '', text)
+                    else:
+                        # 中文去除常见语气词和标点
+                        text = re.sub(r'<\|[^>]+\|>', '', text)
+                        text = re.sub(r'[嗯啊哦呃诶]', '', text)
+                        text = re.sub(r'[，。！？、\s]', '', text)
                     return text.strip()
         except Exception as e:
             print(f"[ASR error] {e}")
@@ -464,9 +491,6 @@ class VoiceAssistant:
     def close(self):
         self.set_recording(0)
         self.audio.terminate()
-        if pygame.mixer.get_init():
-            pygame.mixer.music.stop()
-            pygame.mixer.quit()
 
 # ------------------ Compatibility aliases for state machine ------------------
 VoiceAssistant.record_utterance = VoiceAssistant.record
@@ -475,7 +499,6 @@ VoiceAssistant.record_utterance = VoiceAssistant.record
 voice_assistant = VoiceAssistant()
 doorbell = DoorbellDetector()
 
-# 为兼容状态机框架的导入接口
 def get_voice_assistant():
     return voice_assistant
 
@@ -483,7 +506,6 @@ def create_doorbell_detector(threshold=0.5, chunk_seconds=1.0):
     return DoorbellDetector(threshold, chunk_seconds)
 
 def main():
-    # 初始化门铃检测器（可选，若不需要可设为 None）
     try:
         doorbell = DoorbellDetector(threshold=0.5)
         doorbell.start()
@@ -492,10 +514,9 @@ def main():
         doorbell = None
 
     assistant = VoiceAssistant()
-    assistant.set_recording(0)  # 初始时关闭录音流
+    assistant.set_recording(0)
 
-    # 等待第一位客人
-    print("等待门铃... (按 Enter 手动触发)")
+    print("等待门铃... (按 Enter 手动触发)" if LANGUAGE == "en" else "等待门铃... (按 Enter 手动触发)")
     if doorbell:
         wait_for_doorbell_with_fallback(doorbell)
     else:
@@ -504,21 +525,20 @@ def main():
     assistant.set_recording(1)
 
     name1 = ask_info(assistant,
-                     "Hello, welcome to the party! What's your name?",
+                     PROMPT_NAME,
                      extract_name,
-                     "Sorry, I didn't catch your name. Could you say it again?",
-                     "Friend")
+                     PROMPT_NAME_RETRY,
+                     FALLBACK_NAME)
     drink1 = ask_info(assistant,
-                      f"{name1}, what's your favorite drink?",
+                      PROMPT_DRINK,
                       extract_drink,
-                      "Sorry, I didn't catch that. What's your favorite drink?",
-                      "Water")
-    assistant.speak(f"Great, {name1}. Please have a seat.")
-
+                      PROMPT_DRINK_RETRY,
+                      FALLBACK_DRINK)
+    assistant.speak(SEAT_GUIDE)
+    # 引导就座的额外语句可以复用 SEAT_GUIDE，也可以单独定义
     assistant.set_recording(0)
 
-    # 等待第二位客人
-    print("等待第二位客人门铃... (按 Enter 手动触发)")
+    print("等待第二位客人门铃... (按 Enter 手动触发)" if LANGUAGE == "en" else "等待第二位客人门铃... (按 Enter 手动触发)")
     if doorbell:
         wait_for_doorbell_with_fallback(doorbell)
     else:
@@ -527,25 +547,25 @@ def main():
     assistant.set_recording(1)
 
     name2 = ask_info(assistant,
-                     "Hello, welcome to the party! What's your name?",
+                     PROMPT_NAME,
                      extract_name,
-                     "Sorry, I didn't catch your name. Could you say it again?",
-                     "Friend")
+                     PROMPT_NAME_RETRY,
+                     FALLBACK_NAME)
     drink2 = ask_info(assistant,
-                      f"{name2}, what's your favorite drink?",
+                      PROMPT_DRINK,
                       extract_drink,
-                      "Sorry, I didn't catch that. What's your favorite drink?",
-                      "Water")
-    assistant.speak(f"Great, {name2}. Please have a seat.")
+                      PROMPT_DRINK_RETRY,
+                      FALLBACK_DRINK)
+    assistant.speak(SEAT_GUIDE)
 
-    assistant.speak(f"{name2}, let me introduce {name1}, who likes to drink {drink1}.")
-    assistant.speak(f"{name1}, this is {name2}, who likes to drink {drink2}.")
-    assistant.speak("Thank you both for coming! Enjoy the party.")
+    assistant.speak(INTRO_TEMPLATE.format(listener=name2, subject=name1, drink=drink1))
+    assistant.speak(INTRO_RESPONSE.format(listener=name1, subject=name2, drink=drink2))
+    assistant.speak(THANK_YOU)
 
     assistant.close()
     if doorbell:
         doorbell.stop()
-    print("程序结束。")
+    print("程序结束。" if LANGUAGE == "en" else "程序结束。")
 
 if __name__ == "__main__":
     main()

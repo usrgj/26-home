@@ -9,3 +9,8 @@ AGENTS.md
 tmp.py
 debug_ctx.example.json
 logs/
+pids/
+*.png
+*.pt
+*.mp3
+models/

@@ -205,6 +205,17 @@ class AGVApi:
         """
         self._send(_NAV, "0BF0", {"angle": angle, "vw": vw, "mode": mode})
 
+    def move_circular(self, rot_radius: float, rot_degree: float, rot_speed: float):
+        '''
+        圆弧运动
+
+        rot_radius: 旋转半径, 单位m; 圆心在机器人坐标系左边为正, 右边为负
+        rot_degree: 旋转角度, 单位度
+        rot_speed: 旋转速度, 单位为 rad/s, 如果是负数, 则说明是顺时针走
+
+        '''
+        self._send(_NAV, "0BF2", {"rot_radius": rot_radius, "rot_degree": rot_degree, "rot_speed": rot_speed})
+
     def pause_navigation(self):
         """暂停当前导航"""
         self._send(_NAV, "0BB9")
