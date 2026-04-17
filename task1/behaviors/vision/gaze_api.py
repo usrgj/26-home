@@ -1,22 +1,46 @@
-from ultralytics import YOLO
-from .gaze_tracking import get_person_direction
+import threading
+import time
+from gaze_tracking import get_person_direction
 
-class GazeAPI:
-    def __init__(self, model_path='yolov8n.pt'):
-        self.model = YOLO(model_path)
-
-    def detect_persons(self, frame, conf=0.5):
-        results = self.model(frame, conf=conf, classes=0, verbose=False)
-        bboxes = []
-        for r in results:
-            for b in r.boxes:
-                bboxes.append(tuple(map(int, b.xyxy[0])))
-        return bboxes
-
-    def get_person_direction(self, frame, conf=0.5, threshold=0.15):
-        bboxes = self.detect_persons(frame, conf)
-        if not bboxes:
-            return None
-        h, w = frame.shape[:2]
-        ctrl = get_person_direction(bboxes[0], w, h, threshold)
-        return ctrl
+def start_gaze_tracking_thread(head_controller, tracker, cam, guest_name, duration=30):
+    """
+    能力接口：启动实时目光追踪线程，外部可用stop_event控制停止
+    用法：
+        gaze_thread, stop_event = start_gaze_tracking_thread(...)
+        # ...需要停止时:
+        stop_event.set()
+        gaze_thread.join()
+    """
+    stop_event = threading.Event()
+    def worker():
+        start_time = time.time()
+        current_pos_h = 0
+        current_pos_v = 0
+        threshold = 25
+        step = 0x400
+        while not stop_event.is_set() and time.time() - start_time < duration:
+            info = tracker.get_person_info(tracker.target_guests.get(guest_name))
+            ret, frame = cam.read()
+            if not info or not ret:
+                time.sleep(0.1)
+                continue
+            ctrl = get_person_direction(info['bbox'], frame.shape[1], frame.shape[0])
+            offset_x = ctrl['offset_x']
+            offset_y = ctrl['offset_y']
+            if abs(offset_x) > threshold:
+                if offset_x > 0:
+                    current_pos_h -= step
+                else:
+                    current_pos_h += step
+                head_controller.rotate_horizontal(current_pos_h)
+            if abs(offset_y) > threshold:
+                if offset_y > 0:
+                    current_pos_v -= step
+                else:
+                    current_pos_v += step
+                head_controller.rotate_vertical(current_pos_v)
+            time.sleep(0.1)
+        print(f"✓ {guest_name.upper()} 追踪线程结束")
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    return t, stop_event

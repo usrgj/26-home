@@ -14,12 +14,19 @@ from __future__ import annotations
 
 import logging
 import math
+import sys
+from pathlib import Path
 
 from common.state_machine import State
 from common.skills.agv_api import agv, wait_nav
 from common.skills.audio_module.voice_assiant import voice_assistant
 from common.skills.head_control import pan_tilt
 from task1 import config
+
+# 导入语言配置
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # 向上2级到 26-home
+sys.path.insert(0, str(PROJECT_ROOT))
+from common.config import LANGUAGE
 
 log = logging.getLogger("task1.introduce_guests")
 
@@ -128,56 +135,95 @@ def _get_seat_nav_id(seat_id: str) -> str:
 
 
 def _build_intro_text(listener, subject, subject_index: int) -> str:
-    """生成中文介绍文案。"""
+    """根据全局语言配置生成介绍文案（英文或中文）。"""
     listener_name = (getattr(listener, "name", "") or "").strip()
     subject_name = (getattr(subject, "name", "") or "").strip()
     favorite_drink = (getattr(subject, "favorite_drink", "") or "").strip()
     subject_features = getattr(subject, "visual_features", {}) or {}
 
-    listener_label = listener_name or "这位客人"
-    subject_label = subject_name or _get_guest_fallback_name(subject_index)
+    if LANGUAGE == "en":
+        listener_label = listener_name or "this guest"
+        subject_label = subject_name or _get_guest_fallback_name_en(subject_index)
+        sentences = [f"{listener_label}, this is {subject_label}."]
+        if favorite_drink:
+            sentences.append(f"{subject_label}'s favorite drink is {favorite_drink}.")
+        feature_phrase = _build_visual_feature_phrase_en(subject_features)
+        if feature_phrase:
+            sentences.append(f"{subject_label} {feature_phrase}.")
+        return " ".join(sentences)
+    else:
+        # 中文版本
+        listener_label = listener_name or "这位客人"
+        subject_label = subject_name or _get_guest_fallback_name_zh(subject_index)
+        sentences = [f"{listener_label}，这位是{subject_label}。"]
+        if favorite_drink:
+            # 假设 favorite_drink 是英文，可以保留或简单处理
+            sentences.append(f"{subject_label}最喜欢的饮料是{favorite_drink}。")
+        feature_phrase = _build_visual_feature_phrase_zh(subject_features)
+        if feature_phrase:
+            sentences.append(f"{subject_label}{feature_phrase}。")
+        return "".join(sentences)
 
-    sentences: list[str] = [f"{listener_label}，这位是{subject_label}。"]
-    if favorite_drink:
-        sentences.append(f"{subject_label}最喜欢的饮品是{favorite_drink}。")
 
-    feature_phrase = _build_visual_feature_phrase(subject_features)
-    if feature_phrase:
-        sentences.append(f"{subject_label}的外貌特征是{feature_phrase}。")
-
-    return "".join(sentences)
+def _get_guest_fallback_name_en(subject_index: int) -> str:
+    return "the first guest" if subject_index == 0 else "the second guest"
 
 
-def _get_guest_fallback_name(subject_index: int) -> str:
-    """姓名缺失时使用稳定的客人代称。"""
+def _get_guest_fallback_name_zh(subject_index: int) -> str:
     return "第一位客人" if subject_index == 0 else "第二位客人"
 
 
-def _build_visual_feature_phrase(features: dict) -> str:
-    """把视觉特征字典转换成简短中文描述。"""
+def _build_visual_feature_phrase_en(features: dict) -> str:
+    """英文视觉特征描述。"""
     if not features:
         return ""
-
-    parts: list[str] = []
-
-    gender = str(features.get("性别", "")).strip()
+    parts = []
+    gender = str(features.get("gender", "")).strip()
     if gender:
-        parts.append(gender)
+        gender_en = "male" if "man" in gender else "female" if "female" in gender else gender
+        parts.append(gender_en)
+    hair_color = str(features.get("hair color", "")).strip()
+    if hair_color:
+        parts.append(f"has {hair_color} hair")
+    clothes_color = str(features.get("clothes color", "")).strip()
+    if clothes_color:
+        parts.append(f"wears {clothes_color} clothes")
+    glasses = str(features.get("glasses", "")).strip()
+    if glasses and "wears" in glasses.lower():
+        parts.append("wears glasses")
+    hat = str(features.get("hat", "")).strip()
+    if hat and "wear" in hat.lower() and "not" not in hat.lower():
+        parts.append("wears a hat")
+    if not parts:
+        return ""
+    return "who is " + ", ".join(parts)
 
-    hair_color = str(features.get("头发颜色", "")).strip()
+
+def _build_visual_feature_phrase_zh(features: dict) -> str:
+    """中文视觉特征描述（简单映射）。"""
+    if not features:
+        return ""
+    parts = []
+    gender = str(features.get("gender", "")).strip()
+    if gender:
+        if "male" in gender.lower():
+            parts.append("男性")
+        elif "female" in gender.lower():
+            parts.append("女性")
+        else:
+            parts.append(gender)
+    hair_color = str(features.get("hair color", "")).strip()
     if hair_color:
         parts.append(f"{hair_color}头发")
-
-    clothes_color = str(features.get("衣服颜色", "")).strip()
+    clothes_color = str(features.get("clothes color", "")).strip()
     if clothes_color:
-        parts.append(f"穿{clothes_color}衣服")
-
-    glasses = str(features.get("眼镜", "")).strip()
-    if glasses and "佩戴" in glasses:
+        parts.append(f"穿着{clothes_color}衣服")
+    glasses = str(features.get("glasses", "")).strip()
+    if glasses and "wears" in glasses.lower():
         parts.append("戴眼镜")
-
-    hat = str(features.get("帽子", "")).strip()
-    if hat and "戴" in hat and "未" not in hat:
+    hat = str(features.get("hat", "")).strip()
+    if hat and "wear" in hat.lower() and "not" not in hat.lower():
         parts.append("戴帽子")
-
+    if not parts:
+        return ""
     return "，".join(parts)

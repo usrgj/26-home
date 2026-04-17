@@ -69,7 +69,7 @@ class VisionDetector:
         self._target_feature: Optional[np.ndarray] = None
         
         from ultralytics import YOLO
-        self._model = YOLO("yolov8s.pt")  
+        self._model = YOLO("yolov8n.pt")  
         
         # ReID模型 (可选，用于多人场景下区分目标) 使用onnet时需要在这里加载模型
         # self._reid_model = 
