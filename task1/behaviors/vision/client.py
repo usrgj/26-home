@@ -6,6 +6,15 @@ import tempfile
 import os
 import re  
 
+
+
+
+prompt = ('Please only output the person\'s appearance features in the following JSON format (in English): '
+'{"hair_color": "string or None", "hat": "True | False | None", "glasses": "True | False | None", "clothing_color": "string or None", "gender": "man | lady | None"} '
+'For example: {"hair_color": "black", "hat": "False", "glasses": "True", "clothing_color": "white", "gender": "man"}. '
+'Do NOT add any explanation or extra words.'
+    )
+
 client = OpenAI(
     api_key="retoo",
     base_url="http://127.0.0.1:8003/v1"
@@ -34,6 +43,10 @@ def analyze_person_features(image_path):
         print("🔄 大模型推理中...")
         
         messages = [
+                    {
+            "role": "system",
+            "content": "你是一个只输出合法JSON的视觉特征提取助手。"
+        },
             {
                 "role": "user",
                 "content": [
@@ -46,11 +59,7 @@ def analyze_person_features(image_path):
                     {
                         "type": "text",
                         "text": (
-                             'Please ONLY output the person\'s appearance features in the following JSON format (in English): '
-    '{"hair_color": "...", "hat": "...", "glasses": "...", "clothing_color": "...", "gender": "..."} '
-    'For example: {"hair_color": "black", "hat": "no hat", "glasses": "yes", "clothing_color": "white", "gender": "male"}. '
-    'Do NOT add any explanation or extra words.'
-                           
+                            prompt
                         )
                     }
                 ]
@@ -61,9 +70,9 @@ def analyze_person_features(image_path):
             model="Qwen3.5-4B",
             messages=messages,
             max_tokens=4096,
-            temperature=0.7,
+            temperature=0.6,
             top_p=0.8,
-            presence_penalty=1.5,
+            presence_penalty=0.5,
             extra_body={
                 "top_k": 20,
                 "chat_template_kwargs": {"enable_thinking": False},

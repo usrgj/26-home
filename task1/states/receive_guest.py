@@ -92,12 +92,13 @@ class ReceiveGuest(State):
                 text = quest_and_answer("Welcome! May I know your name ?")
                 guest.name = extract_name(text)
 
-                crop = _select_best_guest_crop(model, self._cam_head)
-                if crop is not None:
-                    self._feature_jobs[guest_index] = _start_feature_extraction(
-                        guest_index=guest_index,
-                        crop=crop,
-                    )
+                if guest_index == 0:
+                    crop = _select_best_guest_crop(model, self._cam_head)
+                    if crop is not None:
+                        self._feature_jobs[guest_index] = _start_feature_extraction(
+                            guest_index=guest_index,
+                            crop=crop,
+                        )
 
                 text = quest_and_answer("What is your favorite drink ?")
                 guest.favorite_drink = extract_drink(text)
@@ -109,10 +110,12 @@ class ReceiveGuest(State):
 
             # 导航到空位置
             seat_id = ctx.find_free_seat()
+            # 如果找不到空座位，则去第二个位置观察，再找一次
             if seat_id is None:
                 agv.navigate_to(agv.get_current_station(), config.STATION_OBSERVATION)
                 wait_nav(timeout=config.NAV_TIMEOUT)
                 update_seats(ctx, model, self._cam_head, box_key="box2")
+                seat_id = ctx.find_free_seat()
 
             if seat_id is not None:
                 nav_id, angle = _get_seat_navigation_target(seat_id)
@@ -128,21 +131,6 @@ class ReceiveGuest(State):
                 voice_assistant.speak("I'm sorry, there are no free seats available.")
 
             ctx.current_guest_index += 1
-
-            left_arm.rm_movej(
-                config.LEFT_HOME_JOINTS,
-                v=config.ARM_SPEED,
-                r=0,
-                connect=0,
-                block=0,
-            )
-            right_arm.rm_movej(
-                config.RIGHT_HOME_JOINTS,
-                v=config.ARM_SPEED,
-                r=0,
-                connect=0,
-                block=0,
-            )
 
         for guest_index, job in self._feature_jobs.items():
             features = _collect_feature_result(job, timeout_s=_FEATURE_WAIT_TIMEOUT_S)
