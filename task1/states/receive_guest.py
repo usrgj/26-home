@@ -33,7 +33,7 @@ from common.skills.head_control import pan_tilt
 from common.state_machine import State
 from task1 import config
 from task1.behaviors.vision.client import analyze_person_features
-from task1.behaviors.vision.gaze_api import (start_gaze_tracking_nearest_person,detect_persons)
+from task1.behaviors.vision import (GazeAPI,SeatManager)
 log = logging.getLogger("task1.receive_guest")
 
 _DEFAULT_DETECTION_CONF = 0.35
@@ -56,24 +56,44 @@ class FeatureExtractionJob:
 
 class ReceiveGuest(State):
     def __init__(self):
+        self.gaze_api = GazeAPI('yolov8n.pt')
         self._model: YOLO | None = None
         self._cam_head = camera_manager.get(CAMERA_HEAD)
         self._feature_jobs: dict[int, FeatureExtractionJob] = {}
+        seat_coords_1 = [seat["box1"] for seat in config.SEATS if any(seat["box1"])]
+        seat_coords_2 = [seat["box2"] for seat in config.SEATS if any(seat["box2"])]
+        self.seat_manager_1 = SeatManager(seat_coords_1, min_empty=2)
+        self.seat_manager_2 = SeatManager(seat_coords_2, min_empty=2)
 
     def execute(self, ctx) -> str:
         model = self._get_model()
         self._feature_jobs = {}
-
         voice_assistant.set_recording(1)
-
         while ctx.current_guest_index < len(ctx.guests):
 
             agv.navigate_to(agv.get_current_station(), config.STATION_START)
             wait_nav(timeout=config.NAV_TIMEOUT)
 
             pan_tilt.home()
-            # 在这个位置进行第一次观察，座位状态更新，
-            _observe_visible_seats(ctx, model, self._cam_head, box_key="box1")
+
+            # ==== 空座位识别能力接口调用 START ====
+            seat_coords = [seat["box1"] for seat in config.SEATS if any(seat["box1"])]
+            if not hasattr(self, "seat_manager"):
+                self.seat_manager = SeatManager(seat_coords, min_empty=2)
+
+            for _ in range(3):
+                color_frame, _ = self._cam_head.get_frames()
+                if color_frame is None:
+                    continue
+                person_boxes = self.gaze_api.detect_persons(color_frame)
+                self.seat_manager.update_from_detections(person_boxes)
+                time.sleep(0.08)
+
+            seat_status = self.seat_manager.seat_status
+            print("当前座位状态:", seat_status)
+            empty_indices = [i for i, s in enumerate(seat_status) if s == "empty"]
+            print("当前空座位编号：", empty_indices)
+            # ==== 空座位识别能力接口调用 END ====
 
             guest_index = ctx.current_guest_index
             guest = ctx.current_guest
@@ -92,7 +112,7 @@ class ReceiveGuest(State):
 
             # TODO 开门
             # 注视
-            gaze_thread, gaze_stop_event = start_gaze_tracking_nearest_person(pan_tilt, self._cam_head, duration=30)
+            gaze_thread, gaze_stop_event = self.gaze_api.start_gaze_tracking_nearest_person(pan_tilt, self._cam_head, duration=45)
             # 询问姓名和喜爱饮品，同时在后台提取视觉特征
             try:
                 guest.name = _ask_guest_name()
@@ -109,6 +129,7 @@ class ReceiveGuest(State):
                 # 结束注视
                 gaze_stop_event.set()
                 gaze_thread.join()
+                pan_tilt.home()#回中
 
             # 导航到空位置
             seat_id = ctx.find_free_seat()
