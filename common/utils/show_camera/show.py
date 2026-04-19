@@ -1,60 +1,111 @@
+"""Simple OpenCV viewer for one or more cameras."""
+
+from __future__ import annotations
+
 import threading
 import time
+from typing import Any
+
 import cv2
 import numpy as np
-from common.skills.camera import camera_manager
+
 from common.config import CAMERA_HEAD
+from common.skills.camera import camera_manager
+
 
 class ColorViewer:
-    def __init__(self, camera):
-        self.camera = camera
-        self.stop_event = threading.Event()
-        self.thread = threading.Thread(target=self._show_loop, daemon=True)
+    """Display one or more camera streams in separate OpenCV windows.
 
-    def start(self):
-        self.thread.start()
+    Usage:
+        ColorViewer(head_camera, window_name="Head Camera")
+        ColorViewer(head_camera, chest_camera, window_names=["Head", "Chest"])
+    """
 
-    def stop(self):
-        self.stop_event.set()
-        self.thread.join(timeout=2.0)
-        cv2.destroyAllWindows()
+    def __init__(
+        self,
+        *cameras: Any,
+        window_name: str = "Color",
+        window_names: list[str] | tuple[str, ...] | None = None,
+    ) -> None:
+        if not cameras:
+            raise ValueError("ColorViewer 至少需要一个相机对象")
 
-    def _show_loop(self):
-        while not self.stop_event.is_set():
+        if window_names is not None:
+            if len(window_names) != len(cameras):
+                raise ValueError("window_names 数量必须与相机数量一致")
+            names = list(window_names)
+        elif len(cameras) == 1:
+            names = [window_name]
+        else:
+            names = [f"{window_name} {index + 1}" for index in range(len(cameras))]
+
+        self._streams = list(zip(names, cameras))
+        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+
+    def start(self) -> None:
+        """Start the shared display loop once."""
+
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._show_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Stop the display loop and close all windows."""
+
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+
+        for window_name, _camera in self._streams:
             try:
-                color_frame, depth_frame = self.camera.get_frames()
-                # 如果你的 get_frames() 只返回彩色帧，这里改成：
-                # color_frame = self.camera.get_frames()
-            except Exception as e:
-                print(f"get_frames() failed: {e}")
-                time.sleep(0.05)
-                continue
+                cv2.destroyWindow(window_name)
+            except Exception:
+                pass
 
-            if color_frame is None:
-                time.sleep(0.01)
-                continue
+    def _show_loop(self) -> None:
+        """Refresh every window from a single OpenCV event loop."""
 
-            try:
-                img = np.asarray(color_frame)
+        while not self._stop_event.is_set():
+            showed_frame = False
 
-                cv2.imshow("Color", img)
+            for window_name, camera in self._streams:
+                try:
+                    frames = camera.get_frames()
+                except Exception as exc:
+                    print(f"{window_name} get_frames() failed: {exc}")
+                    continue
 
+                if isinstance(frames, (tuple, list)):
+                    color_frame = frames[0] if frames else None
+                else:
+                    color_frame = frames
+
+                if color_frame is None:
+                    continue
+
+                try:
+                    cv2.imshow(window_name, np.asarray(color_frame))
+                    showed_frame = True
+                except Exception as exc:
+                    print(f"{window_name} imshow failed: {exc}")
+
+            if showed_frame:
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q") or key == 27:
-                    self.stop_event.set()
+                    self._stop_event.set()
                     break
-
-            except Exception as e:
-                print(f"imshow failed: {e}")
-                time.sleep(0.05)
+            else:
+                time.sleep(0.01)
 
 
-def main():
-    cam = camera_manager.get(CAMERA_HEAD)
-    # 替换成你的相机对象
-    camera = cam
+def main() -> None:
+    """Run a simple single-camera demo for local debugging."""
 
-    viewer = ColorViewer(camera)
+    viewer = ColorViewer(camera_manager.get(CAMERA_HEAD), window_name="Head Camera")
     viewer.start()
 
     try:

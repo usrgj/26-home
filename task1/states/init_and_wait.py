@@ -32,8 +32,8 @@ class InitAndWait(State):
         # 异步预热相机，后续状态中 get_frames() 直接读取最新缓存，不阻塞状态机
         cams.start_async(CAMERA_HEAD)
         cams.start_async(CAMERA_CHEST)
-        cams.start_async(CAMERA_LEFT)
-        cams.start_async(CAMERA_RIGHT)
+        # cams.start_async(CAMERA_LEFT)
+        # cams.start_async(CAMERA_RIGHT)
 
         # 机械臂回初始位置（需要释放）
         left_arm.rm_movej(LEFT_HOME_JOINTS, v=ARM_SPEED, r=0, connect=0, block=0)
@@ -45,11 +45,6 @@ class InitAndWait(State):
         # 云台回中
         pan_tilt.home()
         
-        # 打开相机画面
-        from task1.behaviors.show import head_viewer, chest_viewer
-        head_viewer.start()
-        chest_viewer.start()
-
 
         input("[状态0] 硬件就绪，按 Enter 开始比赛...")
 

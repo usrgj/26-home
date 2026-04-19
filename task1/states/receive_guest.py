@@ -64,6 +64,9 @@ class ReceiveGuest(State):
         self._feature_jobs = {}
 
         voice_assistant.set_recording(1)
+                    # 打开相机画面
+        from task1.behaviors.show import viewer
+        viewer.start()
 
         while ctx.current_guest_index < len(ctx.guests):
             guest_index = ctx.current_guest_index
@@ -72,6 +75,7 @@ class ReceiveGuest(State):
             pan_tilt.home()
             agv.navigate_to(agv.get_current_station(), config.STATION_START)
             wait_nav(timeout=config.NAV_TIMEOUT)
+
 
             
             # 在这个位置进行第一次观察，座位状态更新，
