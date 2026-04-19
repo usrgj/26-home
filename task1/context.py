@@ -24,13 +24,11 @@ class TaskContext:
 
         # 座位状态
         self.seats = [dict(s) for s in config.SEATS]
+        for idx in config.PRE_OCCUPIED_SEATS:
+            self.seats[idx]["occupied"] = True
 
-        # 如果明确知道哪些位置被占用，直接设置
-        # for idx in config.PRE_OCCUPIED_SEATS:
-            # self.seats[idx]["occupied"] = True
-
-        # 是否拿到包
-        # self.bag_received: bool = False
+        # 包相关
+        self.bag_received: bool = False
 
         # 错误恢复
         self.failed_state: str = ""

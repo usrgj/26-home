@@ -26,9 +26,8 @@ else:
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUDIO_DIR = os.path.join(BASE_DIR, "audio_cache")
-CACHE_DIR = os.path.join(AUDIO_DIR, "cache")
+CACHE_DIR = AUDIO_DIR   # 直接使用 AUDIO_DIR，不再使用子目录
 os.makedirs(AUDIO_DIR, exist_ok=True)
-os.makedirs(CACHE_DIR, exist_ok=True)
 
 def speed_to_rate(speed):
     percent = int((speed - 1.0) * 100)

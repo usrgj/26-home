@@ -9,7 +9,7 @@
   1. 先面向第二位客人，介绍第一位客人
   2. 再原地转向第一位客人，介绍第二位客人
 """
-
+三
 from __future__ import annotations
 
 import logging
@@ -174,25 +174,37 @@ def _get_guest_fallback_name_zh(subject_index: int) -> str:
 
 
 def _build_visual_feature_phrase_en(features: dict) -> str:
-    """英文视觉特征描述。"""
+    """英文视觉特征描述，兼容中英文key。"""
     if not features:
         return ""
     parts = []
-    gender = str(features.get("gender", "")).strip()
+    # 性别
+    gender = features.get("gender") or features.get("性别", "")
     if gender:
-        gender_en = "male" if "man" in gender else "female" if "female" in gender else gender
-        parts.append(gender_en)
-    hair_color = str(features.get("hair color", "")).strip()
+        gender_en = str(gender).strip().lower()
+        if gender_en in ["male", "female"]:
+            parts.append(gender_en)
+        elif "男" in gender_en:
+            parts.append("male")
+        elif "女" in gender_en:
+            parts.append("female")
+        else:
+            parts.append(gender_en)
+    # 头发颜色
+    hair_color = features.get("hair_color") or features.get("头发颜色", "")
     if hair_color:
         parts.append(f"has {hair_color} hair")
-    clothes_color = str(features.get("clothes color", "")).strip()
+    # 衣服颜色
+    clothes_color = features.get("clothing_color") or features.get("衣服颜色", "")
     if clothes_color:
         parts.append(f"wears {clothes_color} clothes")
-    glasses = str(features.get("glasses", "")).strip()
-    if glasses and "wears" in glasses.lower():
+    # 眼镜
+    glasses = features.get("glasses") or features.get("眼镜", "")
+    if glasses and ("yes" in str(glasses).lower() or "戴" in str(glasses)):
         parts.append("wears glasses")
-    hat = str(features.get("hat", "")).strip()
-    if hat and "wear" in hat.lower() and "not" not in hat.lower():
+    # 帽子
+    hat = features.get("hat") or features.get("帽子", "")
+    if hat and ("yes" in str(hat).lower() or ("戴" in str(hat) and "未" not in str(hat))):
         parts.append("wears a hat")
     if not parts:
         return ""
@@ -200,30 +212,26 @@ def _build_visual_feature_phrase_en(features: dict) -> str:
 
 
 def _build_visual_feature_phrase_zh(features: dict) -> str:
-    """中文视觉特征描述（简单映射）。"""
+    """中文视觉特征描述，直接从中文键名取值。"""
     if not features:
         return ""
     parts = []
-    gender = str(features.get("gender", "")).strip()
+    gender = str(features.get("性别", "")).strip()
     if gender:
-        if "male" in gender.lower():
-            parts.append("男性")
-        elif "female" in gender.lower():
-            parts.append("女性")
-        else:
-            parts.append(gender)
-    hair_color = str(features.get("hair color", "")).strip()
+        parts.append(gender)
+    hair_color = str(features.get("头发颜色", "")).strip()
     if hair_color:
         parts.append(f"{hair_color}头发")
-    clothes_color = str(features.get("clothes color", "")).strip()
+    clothes_color = str(features.get("衣服颜色", "")).strip()
     if clothes_color:
         parts.append(f"穿着{clothes_color}衣服")
-    glasses = str(features.get("glasses", "")).strip()
-    if glasses and "wears" in glasses.lower():
+    glasses = str(features.get("眼镜", "")).strip()
+    if glasses and "戴" in glasses:
         parts.append("戴眼镜")
-    hat = str(features.get("hat", "")).strip()
-    if hat and "wear" in hat.lower() and "not" not in hat.lower():
+    hat = str(features.get("帽子", "")).strip()
+    if hat and "戴" in hat and "未" not in hat:
         parts.append("戴帽子")
     if not parts:
         return ""
-    return "，".join(parts)
+    # 中文中通常用逗号分隔，且前面不需要 "who is"
+    return "，" + "，".join(parts)

@@ -33,14 +33,7 @@ from common.skills.head_control import pan_tilt
 from common.state_machine import State
 from task1 import config
 from task1.behaviors.vision.client import analyze_person_features
-
-# 导入语言配置
-import sys
-from pathlib import Path
-PROJECT_ROOT = Path(__file__).resolve().parents[2]  # 向上2级到 26-home
-sys.path.insert(0, str(PROJECT_ROOT))
-from common.config import LANGUAGE
-
+from task1.behaviors.vision import GazeAPI
 log = logging.getLogger("task1.receive_guest")
 
 _DEFAULT_DETECTION_CONF = 0.35
@@ -48,24 +41,6 @@ _GUEST_CROP_WINDOW_S = 2.0
 _GUEST_CROP_MAX_SAMPLES = 5
 _FEATURE_WAIT_TIMEOUT_S = 2.0
 _GAZE_LOOP_INTERVAL_S = 0.1
-
-# 中英文提示语映射
-if LANGUAGE == "en":
-    PROMPT_NAME = "Hello, welcome to my home. What is your name?"
-    PROMPT_NAME_RETRY = "Sorry, I didn't catch your name. Could you say it again?"
-    PROMPT_DRINK = "What is your favorite drink?"
-    PROMPT_DRINK_RETRY = "Sorry, I didn't catch that. What is your favorite drink?"
-    SPEAK_FOLLOW = "Please follow me, I will show you to your seat."
-    SPEAK_SEAT = "Please have a seat here."
-    SPEAK_NO_SEAT = "I'm sorry, there are no free seats available."
-else:
-    PROMPT_NAME = "你好，欢迎来到我家。请问你叫什么名字？"
-    PROMPT_NAME_RETRY = "抱歉，我没听清你的名字，能再说一遍吗？"
-    PROMPT_DRINK = "你最喜欢的饮料是什么？"
-    PROMPT_DRINK_RETRY = "抱歉，我没听清你喜欢的饮料，能再说一次吗？"
-    SPEAK_FOLLOW = "请跟我来，我带您去座位。"
-    SPEAK_SEAT = "请坐这里。"
-    SPEAK_NO_SEAT = "抱歉，没有空余座位了。"
 
 
 @dataclass
@@ -81,6 +56,7 @@ class FeatureExtractionJob:
 
 class ReceiveGuest(State):
     def __init__(self):
+        self.gaze_api = GazeAPI('yolov8n.pt')
         self._model: YOLO | None = None
         self._cam_head = camera_manager.get(CAMERA_HEAD)
         self._feature_jobs: dict[int, FeatureExtractionJob] = {}
@@ -97,6 +73,7 @@ class ReceiveGuest(State):
             wait_nav(timeout=config.NAV_TIMEOUT)
 
             pan_tilt.home()
+            # 在这个位置进行第一次观察，座位状态更新，
             _observe_visible_seats(ctx, model, self._cam_head, box_key="box1")
 
             guest_index = ctx.current_guest_index
@@ -114,16 +91,9 @@ class ReceiveGuest(State):
             agv.navigate_to(config.STATION_START, config.STATION_DOOR)
             wait_nav(timeout=config.NAV_TIMEOUT)
 
+            # TODO 开门
             # 注视
-            gaze_stop_event = threading.Event()
-            gaze_thread = threading.Thread(
-                target=_gaze_loop,
-                args=(gaze_stop_event, model, self._cam_head, pan_tilt),
-                name=f"gaze_guest_{guest_index}",
-                daemon=True,
-            )
-            gaze_thread.start()
-
+            gaze_thread, gaze_stop_event = self.gaze_api.start_gaze_tracking_nearest_person(pan_tilt, self._cam_head, duration=45)
             # 询问姓名和喜爱饮品，同时在后台提取视觉特征
             try:
                 guest.name = _ask_guest_name()
@@ -137,7 +107,10 @@ class ReceiveGuest(State):
 
                 guest.favorite_drink = _ask_guest_drink()
             finally:
-                _stop_gaze_thread(gaze_stop_event, gaze_thread) 
+                # 结束注视
+                gaze_stop_event.set()
+                gaze_thread.join()
+                pan_tilt.home()#回中
 
             # 导航到空位置
             seat_id = ctx.find_free_seat()
@@ -150,16 +123,16 @@ class ReceiveGuest(State):
 
             if seat_id is not None:
                 nav_id, angle = _get_seat_navigation_target(seat_id)
-                voice_assistant.speak(SPEAK_FOLLOW)
+                voice_assistant.speak("Please follow me, I will show you to your seat.")
                 pan_tilt.home()
                 agv.navigate_to(agv.get_current_station() or "", nav_id, angle)
                 wait_nav(timeout=config.NAV_TIMEOUT)
-                voice_assistant.speak(SPEAK_SEAT)
+                voice_assistant.speak("Please have a seat here.")
 
                 guest.seat_id = seat_id
                 ctx.occupy_seat(seat_id)
             else:
-                voice_assistant.speak(SPEAK_NO_SEAT)
+                voice_assistant.speak("I'm sorry, there are no free seats available.")
                 log.warning("没有找到可用座位，guest=%s", guest.name or guest_index)
 
             ctx.current_guest_index += 1
@@ -187,6 +160,7 @@ class ReceiveGuest(State):
         return "introduce"
 
     def _get_model(self) -> YOLO:
+        """延迟初始化 YOLO，避免模块导入时立刻加载模型。"""
         if self._model is None:
             self._model = YOLO("yolov8n.pt")
         return self._model
@@ -194,8 +168,10 @@ class ReceiveGuest(State):
 
 def _ask_guest_name() -> str:
     """通过语音询问并提取客人姓名。"""
+    prompt = "hello，welcome to my home,what is your name?"
+
     for attempt in range(config.ASK_RETRIES):
-        voice_assistant.speak(PROMPT_NAME if attempt == 0 else PROMPT_NAME_RETRY)
+        voice_assistant.speak(prompt)
         recognized_text = _record_and_recognize_text()
         if recognized_text:
             log.info("姓名语音识别结果: %s", recognized_text)
@@ -207,7 +183,27 @@ def _ask_guest_name() -> str:
     log.warning("未能提取到客人姓名")
     return ""
 
+
+def _ask_guest_drink() -> str:
+    """通过语音询问并提取客人喜爱饮品。"""
+    prompt = "what is your favourite drink?"
+
+    for attempt in range(config.ASK_RETRIES):
+        voice_assistant.speak(prompt)
+        recognized_text = _record_and_recognize_text()
+        if recognized_text:
+            log.info("饮品语音识别结果: %s", recognized_text)
+        drink = _extract_favorite_drink(recognized_text)
+        if drink:
+            log.info("提取到饮品: %s", drink)
+            return drink
+
+    log.warning("未能提取到客人饮品")
+    return ""
+
+
 def _record_and_recognize_text() -> str:
+    """录制一段语音并调用现有识别接口。"""
     audio_frames = voice_assistant.record_utterance()
     if not audio_frames:
         return ""
@@ -220,6 +216,7 @@ def _record_and_recognize_text() -> str:
 
 
 def _extract_favorite_drink(text: str) -> str:
+    """优先走英文饮品抽取，失败后回退到配置里的直匹配。"""
     if not text:
         return ""
 
@@ -234,6 +231,7 @@ def _extract_favorite_drink(text: str) -> str:
 
 
 def _find_free_seat_after_additional_observation(ctx, yolo_model, camera) -> str | None:
+    """导航到额外观察位，补齐未知座位的可见状态。"""
     if not config.STATION_OBSERVATION:
         return None
 
@@ -245,6 +243,7 @@ def _find_free_seat_after_additional_observation(ctx, yolo_model, camera) -> str
 
 
 def _observe_visible_seats(ctx, yolo_model, camera, box_key: str) -> None:
+    """用当前视角里可见的座位框更新占用状态。"""
     color_frame, depth_frame = _wait_for_latest_frame(camera, timeout_s=1.5)
     if color_frame is None:
         log.warning("座位观察失败：未获取到图像")
@@ -270,6 +269,7 @@ def _observe_visible_seats(ctx, yolo_model, camera, box_key: str) -> None:
 
 
 def _get_seat_navigation_target(seat_id: str) -> tuple[str, float]:
+    """把 seat_id 映射到真正的导航点。"""
     for seat_mapping in config.SEATS_MAPPING:
         if seat_mapping["seat_id"] == seat_id:
             return seat_mapping["nav_id"], seat_mapping["angle"]
@@ -282,6 +282,7 @@ def _select_best_guest_crop(
     window_s: float = _GUEST_CROP_WINDOW_S,
     max_samples: int = _GUEST_CROP_MAX_SAMPLES,
 ) -> np.ndarray | None:
+    """在稳定注视窗口内抓取若干帧，选出最佳人物裁剪图。"""
     deadline = time.time() + window_s
     best_crop: np.ndarray | None = None
     best_score = float("-inf")
@@ -322,6 +323,7 @@ def _select_best_guest_crop(
 
 
 def _start_feature_extraction(guest_index: int, crop: np.ndarray) -> FeatureExtractionJob:
+    """启动后台外貌特征提取任务。"""
     job = FeatureExtractionJob(guest_index=guest_index)
 
     def worker() -> None:
@@ -357,6 +359,7 @@ def _start_feature_extraction(guest_index: int, crop: np.ndarray) -> FeatureExtr
 
 
 def _collect_feature_result(job: FeatureExtractionJob, timeout_s: float) -> dict[str, Any]:
+    """在进入 introduce 前按短超时收集后台外貌提取结果。"""
     if not job.done_event.wait(timeout_s):
         log.warning("客人 #%d 外貌提取超时", job.guest_index)
         return {}
@@ -376,6 +379,9 @@ def gaze(
     tolerance_px: int = 50,
     person_class_id: int = 0,
 ) -> dict[str, Any]:
+    """
+    检测最近的人，将其“上 1/3 位置”对准画面中心，并把像素偏差发送给云台。
+    """
     color_frame, depth_frame = _split_frames(camera.get_frames())
     if color_frame is None:
         return {
@@ -439,6 +445,7 @@ def _gaze_loop(
     gimbal,
     interval_s: float = _GAZE_LOOP_INTERVAL_S,
 ) -> None:
+    """后台循环调用 gaze，直到主线程置位 stop_event。"""
     while not stop_event.is_set():
         try:
             gaze(yolo_model, camera, gimbal)
@@ -449,12 +456,14 @@ def _gaze_loop(
 
 
 def _stop_gaze_thread(stop_event: threading.Event, gaze_thread: threading.Thread | None) -> None:
+    """统一停止并回收 gaze 线程。"""
     stop_event.set()
     if gaze_thread is not None:
         gaze_thread.join(timeout=1.0)
 
 
 def _wait_for_latest_frame(camera, timeout_s: float) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """等待相机缓存中出现一帧可用图像。"""
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         color_frame, depth_frame = _split_frames(camera.get_frames())
@@ -465,6 +474,7 @@ def _wait_for_latest_frame(camera, timeout_s: float) -> tuple[np.ndarray | None,
 
 
 def _split_frames(frames) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """兼容 get_frames 返回 frame 或 (color, depth)。"""
     if frames is None:
         return None, None
     if isinstance(frames, tuple):
@@ -481,6 +491,7 @@ def _detect_person_boxes(
     conf: float,
     person_class_id: int,
 ) -> list[tuple[int, int, int, int]]:
+    """从 YOLO 结果中提取 person 框。"""
     results = yolo_model(frame, conf=conf, verbose=False)
     if not results:
         return []
@@ -508,6 +519,7 @@ def _select_closest_person(
     bboxes: list[tuple[int, int, int, int]],
     depth_frame: np.ndarray | None,
 ) -> tuple[int, int, int, int]:
+    """优先用深度图选最近的人；没有深度图时退化为面积最大的框。"""
     if depth_frame is None:
         return max(bboxes, key=_bbox_area)
 
@@ -540,6 +552,7 @@ def _select_closest_person(
 
 
 def _crop_person_with_margin(frame: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray | None:
+    """在人物框周围保留少量边缘，提升外貌描述信息完整性。"""
     x1, y1, x2, y2 = bbox
     h, w = frame.shape[:2]
     pad_x = int((x2 - x1) * 0.08)
@@ -559,6 +572,7 @@ def _crop_person_with_margin(frame: np.ndarray, bbox: tuple[int, int, int, int])
 
 
 def _score_person_crop(bbox: tuple[int, int, int, int], frame_w: int, frame_h: int) -> float:
+    """综合框面积和居中程度给候选 crop 打分。"""
     x1, y1, x2, y2 = bbox
     area_ratio = _bbox_area(bbox) / max(1, frame_w * frame_h)
     center_x = (x1 + x2) / 2.0
@@ -576,6 +590,7 @@ def _person_overlaps_seat(
     person_bbox: tuple[int, int, int, int],
     seat_bbox: tuple[int, int, int, int],
 ) -> bool:
+    """用重叠和下半身位置做简单座位占用判断。"""
     px1, py1, px2, py2 = person_bbox
     sx1, sy1, sx2, sy2 = seat_bbox
 
@@ -601,6 +616,7 @@ def _bbox_area(bbox: tuple[int, int, int, int]) -> int:
 
 
 def _send_offset_to_gimbal(gimbal, dx: int, dy: int) -> None:
+    """把像素偏差发给云台。"""
     if callable(gimbal):
         gimbal(dx, dy)
         return

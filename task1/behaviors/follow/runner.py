@@ -1,11 +1,7 @@
 """
-可嵌入任务状态机的人物跟随运行器。
-
-职责：
-- 管理跟随子系统的初始化、单周期执行和停止/清理
-- 保留 follow 子系统内部的 EKF、跟随状态机和控制逻辑
-- 为 task1 外层状态机提供 start/step/stop 风格接口
+可嵌入任务状态机的人物跟随运行器（改进版：传递预测位置和速度方差）。
 """
+
 from __future__ import annotations
 
 import math
@@ -86,11 +82,6 @@ class FollowRunner:
         return self._target_locked
 
     def start(self, lock_target: bool = True, target_camera: str = "head") -> bool:
-        """
-        初始化并启动跟随循环。
-
-        返回值表示当前会话是否已完成视觉锁目标。
-        """
         if self._closed:
             raise RuntimeError("FollowRunner 已关闭，不能再次启动")
 
@@ -109,6 +100,14 @@ class FollowRunner:
             self._vision_det.reset_target()
         if hasattr(self._fusion, "reset"):
             self._fusion.reset()
+
+        # ----- 新增：等待有效位姿（最多1秒）-----
+        for _ in range(10):
+            pose = self._robot_api.get_robot_pose()
+            if pose.x is not None and pose.y is not None:
+                self._last_robot_pose = pose
+                break
+            time.sleep(0.1)
 
         if lock_target:
             logger.info("正在锁定跟随目标...")
@@ -199,9 +198,18 @@ class FollowRunner:
             vision_detections = []
             target_detection = None
 
+            # ----- 修改：获取 EKF 预测位置，传给视觉检测器用于空间约束匹配 -----
+            predicted_pos = None
+            if self._fusion._initialized:
+                temp_state = self._fusion.get_target_state()
+                if temp_state.is_valid:
+                    predicted_pos = (temp_state.predicted_x, temp_state.predicted_y)
+
             if self._loop_count % self._vision_interval == 0:
                 try:
-                    vision_detections = self._vision_det.detect(self._robot_api, robot_pose)
+                    vision_detections = self._vision_det.detect(
+                        self._robot_api, robot_pose, predicted_pos
+                    )
                     for det in vision_detections:
                         if det.is_target:
                             target_detection = det
@@ -240,6 +248,13 @@ class FollowRunner:
                 self._fusion.predict_only(now)
 
             target_state = self._fusion.get_target_state()
+
+            # ----- 新增：将速度方差附加到 target_state 对象上，供 motion_controller 使用 -----
+            # sensor_fusion 中需要暴露速度协方差矩阵的对应元素，这里假设已添加属性 speed_variance
+            if hasattr(self._fusion, 'get_speed_variance'):
+                target_state.speed_variance = self._fusion.get_speed_variance()
+            else:
+                target_state.speed_variance = 1.0  # 默认高方差，不信任前馈
 
             cmd_linear = 0.0
             cmd_angular = 0.0
@@ -290,12 +305,13 @@ class FollowRunner:
                         target_state.y - robot_pose.y,
                     )
                     logger.info(
-                        "%s | 目标(%.2f,%.2f) 距离=%.2fm 速度=%.2fm/s | LiDAR候选=%d",
+                        "%s | 目标(%.2f,%.2f) 距离=%.2fm 速度=%.2fm/s 方差=%.3f | LiDAR候选=%d",
                         status,
                         target_state.x,
                         target_state.y,
                         dist,
                         target_state.speed,
+                        getattr(target_state, 'speed_variance', 1.0),
                         lidar_count,
                     )
                 else:
