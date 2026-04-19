@@ -158,8 +158,8 @@ class VisionDetector:
         """
         在单个相机帧中检测人物。
         """
-            # ----- 新增：位姿有效性检查 -----
-    	if robot_pose.x is None or robot_pose.y is None or robot_pose.theta is None:
+        # 位姿不可用时直接跳过，避免坐标换算抛异常。
+        if robot_pose.x is None or robot_pose.y is None or robot_pose.theta is None:
             return []
         detections = []
         cam_config = CAMERAS[camera_name]

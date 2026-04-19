@@ -12,7 +12,7 @@ gaze_controller.py
 import cv2
 import time
 import threading
-from gaze_tracking import get_person_direction
+from .gaze_tracking import get_person_direction
 
 def start_gaze_tracking_thread(head_controller, tracker, cap, guest_name, model, duration=30):
     """
@@ -20,7 +20,16 @@ def start_gaze_tracking_thread(head_controller, tracker, cap, guest_name, model,
     """
     stop_event = threading.Event()
     def worker():
-        continuous_gaze_tracking(head_controller, tracker, None, model, cap, guest_name, duration)
+        continuous_gaze_tracking(
+            head_controller,
+            tracker,
+            None,
+            model,
+            cap,
+            guest_name,
+            duration=duration,
+            stop_event=stop_event,
+        )
     t = threading.Thread(target=worker, daemon=True)
     t.start()
     return t, stop_event
@@ -131,7 +140,16 @@ def smooth_gaze_tracking(head_controller, tracker, frame, model, cap, guest_name
     
     print(f"✓ {guest_name}转向完成\n")
 
-def continuous_gaze_tracking(head_controller, tracker, frame, model, cap, target, duration=30):
+def continuous_gaze_tracking(
+    head_controller,
+    tracker,
+    frame,
+    model,
+    cap,
+    target,
+    duration=30,
+    stop_event=None,
+):
     """持续目光追踪 - 自动跟随人物移动
     Args:
         head_controller: 头部控制器实例
@@ -155,16 +173,16 @@ def continuous_gaze_tracking(head_controller, tracker, frame, model, cap, target
     
     frame_count = 0
     while time.time() - start_time < duration:
-    if stop_event is not None and stop_event.is_set():
-        print(f"✓ {target.upper()} 追踪线程被外部终止")
-        break
+        if stop_event is not None and stop_event.is_set():
+            print(f"✓ {target.upper()} 追踪线程被外部终止")
+            break
 
-    info = tracker.get_person_info(tracker.target_guests.get(target))
-    if not info:
-        print("⚠️ 人物丢失，等待重新检测...")
-        time.sleep(0.1)
-        continue
-        
+        info = tracker.get_person_info(tracker.target_guests.get(target))
+        if not info:
+            print("⚠️ 人物丢失，等待重新检测...")
+            time.sleep(0.1)
+            continue
+
         ctrl = get_person_direction(info['bbox'], frame.shape[1], frame.shape[0])
         offset_x = ctrl['offset_x']
         offset_y = ctrl['offset_y']

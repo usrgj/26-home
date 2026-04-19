@@ -9,7 +9,6 @@
   1. 先面向第二位客人，介绍第一位客人
   2. 再原地转向第一位客人，介绍第二位客人
 """
-三
 from __future__ import annotations
 
 import logging

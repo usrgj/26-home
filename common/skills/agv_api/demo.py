@@ -28,7 +28,7 @@ if __name__ == "__main__":
     # agv.send_velocity(0.3, 0.0, duration=0) #开环运动
     # time.sleep(5)
 
-    agv.navigate_to("", "LM1")
+    print(agv.navigate_to("", "LM2"))
     time.sleep(3)
     wait_nav()
 

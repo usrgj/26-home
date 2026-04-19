@@ -4,8 +4,9 @@ from ultralytics import YOLO
 from .gaze_tracking import get_person_direction  
 
 class GazeAPI:
-    def __init__(self, model: YOLO):
-        self.model = model
+    def __init__(self, model: YOLO | str = "yolov8n.pt"):
+        """允许直接传已加载 YOLO 模型，或传模型路径字符串。"""
+        self.model = model if isinstance(model, YOLO) else YOLO(model)
 
     def detect_persons(self, frame, conf=0.5):
         """返回当前帧的所有人体框 [(x1, y1, x2, y2), ...]"""

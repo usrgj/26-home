@@ -1,0 +1,571 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Multi-language Voice Assistant with Doorbell Detection (Local YAMNet)
+Supports manual Enter key fallback.
+Language controlled by common.config.LANGUAGE ('en' or 'zh').
+"""
+
+import time
+import threading
+import collections
+import requests
+import io
+import numpy as np
+import noisereduce as nr
+import os
+import tempfile
+import re
+import hashlib
+import subprocess
+import pyaudio
+import wave
+import webrtcvad
+import spacy
+import sys
+import select
+
+# ------------------ Import language config ------------------
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, PROJECT_ROOT)
+from common.config import LANGUAGE
+
+# ------------------ Doorbell detection (Local YAMNet) ------------------
+import tensorflow as tf
+
+YAMNET_MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "yamnet")
+
+# ------------------ Configuration ------------------
+ASR_URL = "http://127.0.0.1:8001/api/speech_recognition"
+TTS_URL = "http://127.0.0.1:8002/v1/audio/speech"
+
+FORMAT = pyaudio.paInt16
+CHANNELS = 1
+RATE = 16000
+FRAME_DURATION_MS = 30
+CHUNK = int(RATE * FRAME_DURATION_MS / 1000)
+SPEECH_START_FRAMES = 12
+SILENCE_TIMEOUT_MS = 1500
+MAX_RECORD_DURATION_MS = 10000
+RING_BUFFER_MAXLEN = int(1000 / FRAME_DURATION_MS)
+MAX_LOW_ENERGY_FRAMES = 30
+
+# 缓存目录改为当前文件所在目录下的 audio_cache
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+TTS_CACHE_DIR = os.path.join(CURRENT_DIR, "audio_cache")
+os.makedirs(TTS_CACHE_DIR, exist_ok=True)
+
+# 多语言文本和列表
+if LANGUAGE == "en":
+    COMMON_DRINKS = [
+        "coke", "coca cola", "pepsi", "sprite", "fanta", "7up", "juice", "orange juice",
+        "apple juice", "milk", "yogurt", "water", "mineral water", "tea", "black tea",
+        "green tea", "oolong tea", "coffee", "latte", "cappuccino", "beer", "wine",
+        "red wine", "white wine", "cocktail", "lemonade", "soda"
+    ]
+    PROMPT_NAME = "Hello, welcome to the party! What's your name?"
+    PROMPT_NAME_RETRY = "Sorry, I didn't catch your name. Could you say it again?"
+    PROMPT_DRINK = "What's your favorite drink?"
+    PROMPT_DRINK_RETRY = "Sorry, I didn't catch that. What's your favorite drink?"
+    SEAT_GUIDE = "Please follow me, I will show you to your seat."
+    SEAT_HERE = "Please have a seat here."
+    NO_SEAT = "I'm sorry, there are no free seats available."
+    INTRO_TEMPLATE = "{listener}, let me introduce {subject}, who likes to drink {drink}."
+    INTRO_RESPONSE = "{listener}, this is {subject}, who likes to drink {drink}."
+    THANK_YOU = "Thank you both for coming! Enjoy the party."
+    FALLBACK_NAME = "Friend"
+    FALLBACK_DRINK = "Water"
+else:
+    COMMON_DRINKS = [
+        "可乐", "雪碧", "芬达", "美年达", "七喜", "果汁", "橙汁", "苹果汁",
+        "牛奶", "酸奶", "水", "矿泉水", "茶", "红茶", "绿茶", "乌龙茶",
+        "咖啡", "拿铁", "卡布奇诺", "啤酒", "红酒"
+    ]
+    PROMPT_NAME = "你好，欢迎来到派对！请问你叫什么名字？"
+    PROMPT_NAME_RETRY = "抱歉，我没听清你的名字，能再说一遍吗？"
+    PROMPT_DRINK = "你最喜欢的饮料是什么？"
+    PROMPT_DRINK_RETRY = "抱歉，我没听清你喜欢的饮料，能再说一次吗？"
+    SEAT_GUIDE = "请跟我来，我带您去座位。"
+    SEAT_HERE = "请坐这里。"
+    NO_SEAT = "抱歉，没有空座位了。"
+    INTRO_TEMPLATE = "{listener}，让我介绍一下{subject}，他/她喜欢喝{drink}。"
+    INTRO_RESPONSE = "{listener}，这位是{subject}，他/她喜欢喝{drink}。"
+    THANK_YOU = "感谢两位的光临，祝您愉快！"
+    FALLBACK_NAME = "朋友"
+    FALLBACK_DRINK = "水"
+
+# Load NLP model (only for English name extraction; Chinese uses regex)
+if LANGUAGE == "en":
+    try:
+        nlp = spacy.load("en_core_web_sm")
+    except OSError:
+        print("English model not found. Installing...")
+        subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
+        nlp = spacy.load("en_core_web_sm")
+else:
+    nlp = None  # Chinese name extraction uses regex only
+
+# ------------------ Helper Functions ------------------
+def extract_name(text):
+    """Extract person name from text (supports English and Chinese)."""
+    if not text:
+        return None
+    if LANGUAGE == "en" and nlp:
+        doc = nlp(text)
+        for ent in doc.ents:
+            if ent.label_ == "PERSON":
+                return ent.text
+    # Common patterns for both languages
+    if LANGUAGE == "en":
+        patterns = [
+            r"(?:my name is|i am|i'm|called?|name's?)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+            r"^(?:i'?m?|this is)\s+([A-Z][a-z]+)",
+            r"call me\s+([A-Z][a-z]+)",
+        ]
+    else:
+        patterns = [
+            r'(?:我叫|我是|名字是|姓名是|本人叫|本人是)\s*([^\s，。、]+)',
+            r'叫\s*([^\s，。、]+)',
+            r'^([^\s，。、]{2,4})$',
+        ]
+    for p in patterns:
+        m = re.search(p, text, re.IGNORECASE)
+        if m:
+            return m.group(1)
+    words = re.findall(r'[\u4e00-\u9fff]+|[A-Z][a-z]+', text)
+    return words[0] if words else None
+
+def extract_drink(text):
+    """Extract drink name from text using COMMON_DRINKS."""
+    if not text:
+        return None
+    text_lower = text.lower()
+    for drink in COMMON_DRINKS:
+        if drink.lower() in text_lower:
+            return drink
+    return None
+
+def wait_for_doorbell_with_fallback(detector):
+    print("Waiting for doorbell... (Press Enter to manually trigger)" if LANGUAGE == "en" else "等待门铃... (按 Enter 手动触发)")
+    while True:
+        if detector and detector.wait_for_doorbell(timeout=0.5):
+            print("Doorbell detected!" if LANGUAGE == "en" else "门铃检测到！")
+            return True
+        if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
+            line = sys.stdin.readline()
+            if line.strip() == "":
+                print("Manual trigger by Enter key." if LANGUAGE == "en" else "手动触发")
+                return True
+
+def ask_info(assistant, prompt, extract_func, retry_prompt, default=None, max_attempts=2):
+    for attempt in range(max_attempts):
+        assistant.speak(prompt if attempt == 0 else retry_prompt)
+        audio = assistant.record()
+        if audio:
+            text = assistant.recognize(audio)
+            if text:
+                info = extract_func(text)
+                if info:
+                    return info
+    return default
+
+# ------------------ Doorbell Detector Class (Local Model) ------------------
+class DoorbellDetector:
+    def __init__(self, threshold=0.5, chunk_seconds=1.0):
+        self.threshold = threshold
+        self.chunk_seconds = chunk_seconds
+        self.running = False
+        self.doorbell_detected = threading.Event()
+        self.stream = None
+        self.p = None
+        self.model = None
+        self.doorbell_index = None
+        self._init_model()
+
+    def _init_model(self):
+        print("[Doorbell] Loading YAMNet model from:", YAMNET_MODEL_PATH)
+        self.model = tf.saved_model.load(YAMNET_MODEL_PATH)
+
+        csv_path = os.path.join(YAMNET_MODEL_PATH, 'assets', 'yamnet_class_map.csv')
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(f"Class map file not found: {csv_path}")
+
+        class_names = []
+        with open(csv_path, 'r') as f:
+            lines = f.readlines()
+            for line in lines[1:]:
+                parts = line.strip().split(',')
+                if len(parts) >= 3:
+                    class_names.append(parts[2].strip('"'))
+
+        for i, name in enumerate(class_names):
+            if 'doorbell' in name.lower():
+                self.doorbell_index = i
+                break
+
+        if self.doorbell_index is None:
+            raise ValueError("Doorbell class not found in class map")
+        print(f"[Doorbell] Doorbell class index: {self.doorbell_index} ({class_names[self.doorbell_index]})")
+
+    def _detect(self, audio_bytes):
+        audio = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        scores, embeddings, spectrogram = self.model(audio)
+        doorbell_probs = scores[:, self.doorbell_index].numpy()
+        avg_prob = np.mean(doorbell_probs)
+        return avg_prob > self.threshold
+
+    def start(self):
+        if self.running:
+            return
+        self.running = True
+        self.doorbell_detected.clear()
+        self.p = pyaudio.PyAudio()
+        chunk_size = int(RATE * self.chunk_seconds)
+        self.stream = self.p.open(format=FORMAT, channels=CHANNELS, rate=RATE,
+                                  input=True, frames_per_buffer=chunk_size)
+        self.thread = threading.Thread(target=self._listen, daemon=True)
+        self.thread.start()
+        print("[Doorbell] Listening started..." if LANGUAGE == "en" else "[门铃] 开始监听...")
+
+    def _listen(self):
+        while self.running:
+            try:
+                data = self.stream.read(int(RATE * self.chunk_seconds), exception_on_overflow=False)
+                if self._detect(data):
+                    print("[Doorbell] Doorbell detected!" if LANGUAGE == "en" else "[门铃] 检测到门铃！")
+                    self.doorbell_detected.set()
+                    time.sleep(2)
+            except Exception as e:
+                print(f"[Doorbell] Error: {e}")
+                time.sleep(0.5)
+
+    def stop(self):
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=2)
+        if self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+        if self.p:
+            self.p.terminate()
+        print("[Doorbell] Listening stopped." if LANGUAGE == "en" else "[门铃] 停止监听。")
+
+    def wait_for_doorbell(self, timeout=None):
+        return self.doorbell_detected.wait(timeout)
+
+# ------------------ VoiceAssistant Class (only online TTS, MP3 playback) ------------------
+class VoiceAssistant:
+    def __init__(self):
+        self.vad = webrtcvad.Vad(3)
+        self.audio = pyaudio.PyAudio()
+        self.stream = None
+        self.noise_floor = 500.0
+        self.energy_history = collections.deque(maxlen=50)
+        self._mpg123_available = self._check_mpg123()
+
+    def _check_mpg123(self):
+        try:
+            subprocess.run(['which', 'mpg123'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            print("[Info] mpg123 available")
+            return True
+        except:
+            print("[Warning] mpg123 not found, please install: sudo apt install mpg123")
+            return False
+
+    def _play_mp3(self, file_path):
+        if not self._mpg123_available:
+            print("[播放错误] mpg123 not installed")
+            return False
+        try:
+            subprocess.run(['mpg123', '-q', file_path], check=True, timeout=10)
+            time.sleep(0.3)
+            return True
+        except Exception as e:
+            print(f"[播放异常] {e}")
+            return False
+
+    def _get_cache_path(self, text):
+        return os.path.join(TTS_CACHE_DIR, hashlib.md5(text.encode()).hexdigest() + ".mp3")
+
+    def preload_tts(self, text):
+        cache_path = self._get_cache_path(text)
+        if os.path.exists(cache_path):
+            return
+        try:
+            payload = {"model": "tts-1", "input": text, "voice": "alloy", "speed": 1.0}
+            resp = requests.post(TTS_URL, json=payload, timeout=10)
+            if resp.status_code == 200:
+                with open(cache_path, 'wb') as f:
+                    f.write(resp.content)
+                print(f"[Preload] Cached: {text[:50]}...")
+        except Exception as e:
+            print(f"[Preload] Error: {e}")
+
+    def preload_common_phrases(self):
+        common_texts = [
+            PROMPT_NAME, PROMPT_NAME_RETRY,
+            PROMPT_DRINK, PROMPT_DRINK_RETRY,
+            SEAT_GUIDE, SEAT_HERE, THANK_YOU
+        ]
+        for text in common_texts:
+            threading.Thread(target=self.preload_tts, args=(text,), daemon=True).start()
+
+    def set_recording(self, state):
+        if state == 1:
+            if self.stream is None:
+                self.stream = self.audio.open(format=FORMAT, channels=CHANNELS, rate=RATE,
+                                              input=True, frames_per_buffer=CHUNK)
+                time.sleep(0.3)
+                for _ in range(5):
+                    try:
+                        self.stream.read(CHUNK, exception_on_overflow=False)
+                    except:
+                        pass
+        elif state == 0:
+            if self.stream is not None:
+                self.stream.stop_stream()
+                self.stream.close()
+                self.stream = None
+        elif state == 2:
+            if self.stream is not None and self.stream.is_active():
+                self.stream.stop_stream()
+        elif state == 3:
+            if self.stream is not None and not self.stream.is_active():
+                self.stream.start_stream()
+                for _ in range(5):
+                    try:
+                        self.stream.read(CHUNK, exception_on_overflow=False)
+                    except:
+                        pass
+
+    def speak(self, text):
+        print(f"[Robot]: {text}")
+        self.set_recording(2)
+        cache_path = self._get_cache_path(text)
+        if os.path.exists(cache_path):
+            if self._play_mp3(cache_path):
+                self.set_recording(3)
+                return
+            else:
+                os.remove(cache_path)
+        try:
+            resp = requests.post(TTS_URL, json={"model": "tts-1", "input": text, "voice": "alloy", "speed": 1.0}, timeout=5)
+            if resp.status_code == 200:
+                with open(cache_path, 'wb') as f:
+                    f.write(resp.content)
+                if self._play_mp3(cache_path):
+                    self.set_recording(3)
+                    return
+            else:
+                print(f"[在线 TTS 错误] 状态码 {resp.status_code}")
+        except Exception as e:
+            print(f"[在线 TTS 异常] {e}")
+        self.set_recording(3)
+        print(f"[TTS Failed] Could not play: {text}")
+
+    # 降噪、录音、识别等方法保持不变（与语言无关）
+    def update_noise_floor(self, frame_energy, is_speech_vad):
+        if not is_speech_vad:
+            self.energy_history.append(frame_energy)
+            if len(self.energy_history) >= 10:
+                sorted_energies = sorted(self.energy_history)
+                p20_index = max(1, int(len(sorted_energies) * 0.2)) - 1
+                self.noise_floor = min(max(sorted_energies[p20_index] * 1.2, 20.0), 8000.0)
+
+    def denoise(self, audio_frames):
+        if not audio_frames:
+            return audio_frames
+        try:
+            audio_bytes = b''.join(audio_frames)
+            audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
+            audio_float32 = audio_int16.astype(np.float32) / 32768.0
+            noise_sample_len = int(0.5 * RATE)
+            noise_sample = audio_float32[:min(noise_sample_len, len(audio_float32))]
+            reduced = nr.reduce_noise(y=audio_float32, sr=RATE, y_noise=noise_sample if len(noise_sample) > 0 else None,
+                                      prop_decrease=1.0, time_constant_s=2.0, freq_mask_smooth_hz=500,
+                                      time_mask_smooth_ms=50, thresh_n_mult_nonstationary=2,
+                                      sigmoid_slope_nonstationary=10, n_std_thresh_stationary=1.5,
+                                      stationary=False, n_fft=1024, win_length=1024, hop_length=256)
+            reduced_int16 = (reduced * 32768).astype(np.int16)
+            frame_bytes = reduced_int16.tobytes()
+            frame_size = CHUNK * 2
+            return [frame_bytes[i:i+frame_size] for i in range(0, len(frame_bytes), frame_size) if len(frame_bytes[i:i+frame_size]) == frame_size]
+        except:
+            return audio_frames
+
+    def _cleanup_temp_files(self, max_files=50):
+        temp_dir = "temp_audio"
+        os.makedirs(temp_dir, exist_ok=True)
+        try:
+            files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if f.endswith('.wav')]
+            if len(files) > max_files:
+                files.sort(key=os.path.getmtime)
+                for f in files[:-max_files]:
+                    os.remove(f)
+        except:
+            pass
+
+    def recognize(self, audio_frames):
+        denoised = self.denoise(audio_frames)
+        temp_dir = "temp_audio"
+        os.makedirs(temp_dir, exist_ok=True)
+        timestamp = int(time.time() * 1000)
+        temp_path = os.path.join(temp_dir, f"temp_{timestamp}.wav")
+        wf = wave.open(temp_path, 'wb')
+        wf.setnchannels(CHANNELS)
+        wf.setsampwidth(self.audio.get_sample_size(FORMAT))
+        wf.setframerate(RATE)
+        wf.writeframes(b''.join(denoised))
+        wf.close()
+        try:
+            with open(temp_path, 'rb') as af:
+                resp = requests.post(ASR_URL, files={"audio": ("audio.wav", af, "audio/wav")}, timeout=5)
+                if resp.status_code == 200:
+                    text = resp.json().get('text', '').strip()
+                    # 移除可能的特殊标记
+                    if LANGUAGE == "en":
+                        text = re.sub(r'<\|[^>]+\|>', '', text)
+                        text = re.sub(r'\b(uh|um|ah|eh|er|mm|hmm)\b', '', text, flags=re.IGNORECASE)
+                        text = re.sub(r'[^\w\s\']', '', text)
+                    else:
+                        # 中文去除常见语气词和标点
+                        text = re.sub(r'<\|[^>]+\|>', '', text)
+                        text = re.sub(r'[嗯啊哦呃诶]', '', text)
+                        text = re.sub(r'[，。！？、\s]', '', text)
+                    return text.strip()
+        except Exception as e:
+            print(f"[ASR error] {e}")
+        finally:
+            self._cleanup_temp_files(50)
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+        return ""
+
+    def record(self):
+        if self.stream is None:
+            return []
+        ring_buffer = collections.deque(maxlen=RING_BUFFER_MAXLEN)
+        frames = []
+        recording = False
+        silence_frames = 0
+        speech_frames = 0
+        low_energy_frames = 0
+        total_frames = 0
+        max_silence_frames = int(SILENCE_TIMEOUT_MS / FRAME_DURATION_MS)
+        max_total_frames = int(MAX_RECORD_DURATION_MS / FRAME_DURATION_MS)
+        while True:
+            data = self.stream.read(CHUNK, exception_on_overflow=False)
+            audio_array = np.frombuffer(data, dtype=np.int16)
+            energy = np.sqrt(np.mean(audio_array.astype(float)**2))
+            is_vad = self.vad.is_speech(data, RATE)
+            self.update_noise_floor(energy, is_vad)
+            thresh = self.noise_floor * 1.2
+            is_speech = is_vad and (energy > thresh)
+            total_frames += 1
+            if not recording:
+                ring_buffer.append(data)
+                if is_speech:
+                    speech_frames += 1
+                    if speech_frames >= SPEECH_START_FRAMES:
+                        frames.extend(ring_buffer)
+                        recording = True
+                else:
+                    speech_frames = 0
+            else:
+                frames.append(data)
+                if is_speech:
+                    silence_frames = 0
+                    low_energy_frames = 0
+                else:
+                    silence_frames += 1
+                    low_energy_frames += 1
+                    if silence_frames >= max_silence_frames or low_energy_frames >= MAX_LOW_ENERGY_FRAMES:
+                        break
+            if total_frames >= max_total_frames:
+                break
+        return frames
+
+    def close(self):
+        self.set_recording(0)
+        self.audio.terminate()
+
+# ------------------ Compatibility aliases for state machine ------------------
+VoiceAssistant.record_utterance = VoiceAssistant.record
+
+# 创建全局实例（单例）
+voice_assistant = VoiceAssistant()
+doorbell = DoorbellDetector()
+
+def get_voice_assistant():
+    return voice_assistant
+
+def create_doorbell_detector(threshold=0.5, chunk_seconds=1.0):
+    return DoorbellDetector(threshold, chunk_seconds)
+
+def main():
+    try:
+        doorbell = DoorbellDetector(threshold=0.5)
+        doorbell.start()
+    except Exception as e:
+        print(f"门铃检测器启动失败: {e}，将使用手动触发")
+        doorbell = None
+
+    assistant = VoiceAssistant()
+    assistant.set_recording(0)
+
+    print("等待门铃... (按 Enter 手动触发)" if LANGUAGE == "en" else "等待门铃... (按 Enter 手动触发)")
+    if doorbell:
+        wait_for_doorbell_with_fallback(doorbell)
+    else:
+        input("按 Enter 模拟门铃...")
+
+    assistant.set_recording(1)
+
+    name1 = ask_info(assistant,
+                     PROMPT_NAME,
+                     extract_name,
+                     PROMPT_NAME_RETRY,
+                     FALLBACK_NAME)
+    drink1 = ask_info(assistant,
+                      PROMPT_DRINK,
+                      extract_drink,
+                      PROMPT_DRINK_RETRY,
+                      FALLBACK_DRINK)
+    assistant.speak(SEAT_GUIDE)
+    # 引导就座的额外语句可以复用 SEAT_GUIDE，也可以单独定义
+    assistant.set_recording(0)
+
+    print("等待第二位客人门铃... (按 Enter 手动触发)" if LANGUAGE == "en" else "等待第二位客人门铃... (按 Enter 手动触发)")
+    if doorbell:
+        wait_for_doorbell_with_fallback(doorbell)
+    else:
+        input("按 Enter 模拟门铃...")
+
+    assistant.set_recording(1)
+
+    name2 = ask_info(assistant,
+                     PROMPT_NAME,
+                     extract_name,
+                     PROMPT_NAME_RETRY,
+                     FALLBACK_NAME)
+    drink2 = ask_info(assistant,
+                      PROMPT_DRINK,
+                      extract_drink,
+                      PROMPT_DRINK_RETRY,
+                      FALLBACK_DRINK)
+    assistant.speak(SEAT_GUIDE)
+
+    assistant.speak(INTRO_TEMPLATE.format(listener=name2, subject=name1, drink=drink1))
+    assistant.speak(INTRO_RESPONSE.format(listener=name1, subject=name2, drink=drink2))
+    assistant.speak(THANK_YOU)
+
+    assistant.close()
+    if doorbell:
+        doorbell.stop()
+    print("程序结束。" if LANGUAGE == "en" else "程序结束。")
+
+if __name__ == "__main__":
+    main()
