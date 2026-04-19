@@ -18,5 +18,4 @@ doorbell.py是门铃检测系统。依赖要求：pip install tensorflow tensorf
 启动主程序：python ./fake_stream_asr.py
 
 webrtcvad的代码中要用到旧版本的setuptools，不可以下载最新版本的81.0.2,要下载65.5.0的版本。
-start.sh一键启动所有服务器。
-debug_cache里面的是录音记录的文件(生肉和处理后的熟肉都有)，transcripts.txt是语音识别记录，audio_cache是记录释放语音的MP3文件。
+
