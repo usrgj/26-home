@@ -57,6 +57,7 @@ class ReceiveGuest(State):
         self._model: YOLO | None = None
         self._cam_head = camera_manager.get(CAMERA_HEAD)
         self._cam_chest = camera_manager.get(CAMERA_CHEST)
+        self._cam_chest = camera_manager.get(CAMERA_CHEST)
         self._feature_jobs: dict[int, FeatureExtractionJob] = {}
         seat_coords = [seat["box1"] for seat in config.SEATS if any(seat["box1"])]
         if not hasattr(self, "seat_manager"):
@@ -145,7 +146,7 @@ class ReceiveGuest(State):
             if seat_id is None:
                 agv.navigate_to(agv.get_current_station(), config.STATION_OBSERVATION)
                 wait_nav(timeout=config.NAV_TIMEOUT)
-                update_seats(ctx, model, self._cam_head, box_key="box2")
+                update_seats(ctx, model, self._cam_chest, box_key="box2")
                 seat_id = ctx.find_free_seat()
 
             if seat_id is not None:

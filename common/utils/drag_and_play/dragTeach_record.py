@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# coding: utf-8
-# 多轨迹版：睿尔曼机械臂 拖动示教+多轨迹保存（按时间戳命名，不覆盖）
 from Robotic_Arm.rm_robot_interface import *
 import time
 import os
@@ -12,9 +9,9 @@ from datetime import datetime  # 新增：用于生成时间戳
 ARM_IP = "192.168.192.19"
 ARM_PORT = 8080
 # 轨迹保存目录（仅目录，不再是固定文件）
-TRAJECTORY_SAVE_DIR = "/home/blinx/桌面/arm/trajectory/"
+TRAJECTORY_SAVE_DIR = "./trajectory/"
 # 拖动灵敏度（0-100，数值越小越沉，建议50-80）
-DRAG_SENSITIVITY = 70
+DRAG_SENSITIVITY = 100
 
 # -------------------------- 生成带时间戳的轨迹文件名 --------------------------
 def generate_trajectory_filename():
@@ -27,23 +24,6 @@ def generate_trajectory_filename():
     full_path = os.path.join(TRAJECTORY_SAVE_DIR, filename)
     return full_path
 
-# -------------------------- 非阻塞输入检测 --------------------------
-def wait_for_enter_or_ctrlc():
-    """非阻塞等待回车或Ctrl+C，解决SDK阻塞input()的问题"""
-    print("\n 拖动示教已启动！")
-    print(" 操作方式：")
-    print("   1. 手动拖动机械臂走完整流程")
-    print("   2. 完成后按【回车】结束示教并保存轨迹")
-    print("   3. 若回车无反应，按【Ctrl+C】强制结束并保存轨迹")
-    print("-" * 60)
-    
-    while True:
-        rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
-        if rlist:
-            line = sys.stdin.readline()
-            if line.strip() == "":
-                return True
-        time.sleep(0.05)
 
 # -------------------------- 主流程 --------------------------
 if __name__ == "__main__":
@@ -51,11 +31,10 @@ if __name__ == "__main__":
     arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)
     handle = arm.rm_create_robot_arm(ARM_IP, ARM_PORT)
     if handle.id < 0:
-        print("❌ 机械臂连接失败，请检查IP和网络")
+        print("机械臂连接失败，请检查IP和网络")
         exit()
-    print("✅ 机械臂连接成功")
+    print("机械臂连接成功")
 
-    trajectory_saved = False
     # 生成本次示教的轨迹文件名（带时间戳）
     trajectory_file = generate_trajectory_filename()
 
@@ -78,8 +57,7 @@ if __name__ == "__main__":
             raise RuntimeError(f"拖动示教启动失败，错误码：{ret}")
 
         # 5. 等待用户操作
-        wait_for_enter_or_ctrlc()
-
+        input("\n请按回车键结束示教...")
     except KeyboardInterrupt:
         print("\n\n⚠️ 检测到 Ctrl+C，强制结束拖动示教")
     except Exception as e:
@@ -95,17 +73,9 @@ if __name__ == "__main__":
         ret, point_count = arm.rm_save_trajectory(trajectory_file)
         if ret == 0:
             print(f"✅ 轨迹保存成功！")
-            print(f"   保存路径：{trajectory_file}")
-            print(f"   本次记录轨迹点总数：{point_count} 个")
-            trajectory_saved = True
+
         else:
             print(f"❌ 轨迹保存失败，错误码：{ret}")
 
         # 8. 释放机械臂资源
         arm.rm_delete_robot_arm()
-        print("\n✅ 机械臂连接已释放")
-        
-        if trajectory_saved:
-            print("\n 拖动示教完成！可使用 dragTeach_play.py 加载该轨迹运行")
-        else:
-            print("\n❌ 轨迹未保存，请重新运行脚本重试")
