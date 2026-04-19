@@ -1,11 +1,18 @@
 """
-vision_detector.py — 视觉检测与ReID模块（改进版：在线特征更新 + 位置约束匹配）
+=============================================================================
+vision_detector.py — 视觉检测与ReID模块
+=============================================================================
+职责：
+1. 用YOLO或其他检测器在相机图像中检测人物
+2. 从深度图获取目标距离
+3. 将检测结果转换到机器人坐标系/世界坐标系
+4. 维护目标人物的外观特征 (ReID)，用于区分跟随对象和其他人
 """
 import math
 import time
 import numpy as np
 from typing import List, Optional, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .config import (
     CAMERAS, PRIMARY_CAMERAS,
@@ -42,7 +49,7 @@ class PersonDetection:
 
 
 class VisionDetector:
-    """视觉检测器（改进版）"""
+    """视觉检测器"""
     
     def __init__(self):
         """
@@ -53,17 +60,11 @@ class VisionDetector:
         
         # 跟随目标的外观特征模板
         self._target_feature: Optional[np.ndarray] = None
-        # ----- 新增：目标特征在线更新系数（指数移动平均）-----
-        self._feature_update_alpha = 0.2    # 新特征权重
-        
-        # ----- 新增：记录上次目标位置用于空间约束 -----
-        self._last_target_world_pos: Optional[Tuple[float, float]] = None
-        self._last_target_timestamp: float = 0.0
         
         from ultralytics import YOLO
         self._model = YOLO("yolov8s.pt")  
         
-        print("[VisionDetector] 初始化完成（改进版：在线特征更新 + 位置约束）")
+        print("[VisionDetector] 初始化完成")
     
     # =====================================================================
     # 核心检测流程
@@ -77,7 +78,7 @@ class VisionDetector:
         参数:
             robot_api: 机器人API实例
             robot_pose: 当前机器人位姿
-            predicted_target_pos: (x,y) EKF预测的目标世界坐标，用于空间约束匹配
+            predicted_target_pos: 兼容保留，当前未使用
         
         返回:
             所有检测到的人物列表
@@ -99,16 +100,8 @@ class VisionDetector:
         # 去重
         all_detections = self._deduplicate(all_detections)
         
-        # ----- 修改：匹配目标时传入预测位置 -----
-        self._match_target(all_detections, predicted_target_pos)
-        
-        # ----- 新增：更新目标特征（若找到目标）-----
-        for det in all_detections:
-            if det.is_target:
-                self._update_target_feature(det)
-                self._last_target_world_pos = (det.world_x, det.world_y)
-                self._last_target_timestamp = time.time()
-                break
+        _ = predicted_target_pos
+        self._match_target(all_detections)
         
         return all_detections
     
@@ -118,8 +111,6 @@ class VisionDetector:
         """
         if detection.feature is not None:
             self._target_feature = detection.feature.copy()
-            self._last_target_world_pos = (detection.world_x, detection.world_y)
-            self._last_target_timestamp = time.time()
             print(f"[VisionDetector] 已锁定跟随目标，特征维度: {len(self._target_feature)}")
         else:
             print("[VisionDetector] 警告: 检测结果没有特征向量，无法锁定目标")
@@ -127,7 +118,6 @@ class VisionDetector:
     def reset_target(self):
         """清除当前已锁定的目标特征。"""
         self._target_feature = None
-        self._last_target_world_pos = None
     
     def lock_target_from_frame(self, robot_api: RobotAPI, camera_name: str = "head"):
         """
@@ -158,9 +148,6 @@ class VisionDetector:
         """
         在单个相机帧中检测人物。
         """
-        # 位姿不可用时直接跳过，避免坐标换算抛异常。
-        if robot_pose.x is None or robot_pose.y is None or robot_pose.theta is None:
-            return []
         detections = []
         cam_config = CAMERAS[camera_name]
         timestamp = time.time()
@@ -270,9 +257,7 @@ class VisionDetector:
     def _extract_feature(self, color_image: np.ndarray,
                          x1: int, y1: int, x2: int, y2: int
                          ) -> np.ndarray:
-        """
-        提取人物外观特征向量（改进版：增加 HSV 直方图归一化稳健性）
-        """
+        """提取人物外观特征向量，用于ReID。"""
         try:
             import cv2
         except ImportError:
@@ -316,66 +301,24 @@ class VisionDetector:
         
         return feature
     
-    def _match_target(self, detections: List[PersonDetection],
-                      predicted_pos: Optional[Tuple[float, float]] = None):
-        """
-        匹配已锁定的目标，综合外观相似度与空间位置约束。
-        
-        参数:
-            predicted_pos: (x,y) EKF 预测的世界坐标，用于计算位置得分
-        """
+    def _match_target(self, detections: List[PersonDetection]):
+        """将检测列表中的人物与已锁定的目标特征做匹配。"""
         if self._target_feature is None:
             return
         
         best_idx = -1
         best_score = -1.0
         
-        # 使用上次目标位置或预测位置作为空间中心
-        center_pos = predicted_pos if predicted_pos is not None else self._last_target_world_pos
-        
         for i, det in enumerate(detections):
             if det.feature is None:
                 continue
-            
-            # 外观相似度（余弦相似度）
-            app_score = float(np.dot(self._target_feature, det.feature))
-            
-            # ----- 新增：位置得分（距离越近越高）-----
-            pos_score = 0.0
-            if center_pos is not None:
-                dist = math.hypot(det.world_x - center_pos[0], det.world_y - center_pos[1])
-                # 距离在 1.0m 内得满分，超过 2.0m 得 0 分
-                pos_score = max(0.0, 1.0 - (dist - 1.0) / 1.0) if dist > 1.0 else 1.0
-            
-            # ----- 修改：综合得分（外观 0.7，位置 0.3）-----
-            total_score = 0.7 * app_score + 0.3 * pos_score
-            
-            # 外观阈值必须满足最低要求，防止完全靠位置匹配
-            if app_score < REID_SIMILARITY_THRESHOLD * 0.8:
-                continue
-            
-            if total_score > REID_SIMILARITY_THRESHOLD and total_score > best_score:
-                best_score = total_score
+            similarity = float(np.dot(self._target_feature, det.feature))
+            if similarity > REID_SIMILARITY_THRESHOLD and similarity > best_score:
+                best_score = similarity
                 best_idx = i
         
         if best_idx >= 0:
             detections[best_idx].is_target = True
-    
-    def _update_target_feature(self, detection: PersonDetection):
-        """
-        在线更新目标特征（指数移动平均），适应外观缓慢变化。
-        """
-        if self._target_feature is None or detection.feature is None:
-            return
-        
-        # 指数移动平均
-        new_feature = (1 - self._feature_update_alpha) * self._target_feature + \
-                      self._feature_update_alpha * detection.feature
-        norm = np.linalg.norm(new_feature)
-        if norm > 0:
-            self._target_feature = new_feature / norm
-        else:
-            self._target_feature = detection.feature.copy()
     
     def _deduplicate(self, detections: List[PersonDetection],
                      dist_threshold: float = 0.5) -> List[PersonDetection]:

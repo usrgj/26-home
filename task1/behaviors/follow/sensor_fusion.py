@@ -1,11 +1,13 @@
 """
 =============================================================================
-sensor_fusion.py — 扩展卡尔曼滤波 (EKF) 传感器融合跟踪器（改进版）
+sensor_fusion.py — 扩展卡尔曼滤波 (EKF) 传感器融合跟踪器
 =============================================================================
-新增功能：
-1. 暴露速度方差供运动控制器使用
-2. 改进 LiDAR 关联时的中心计算（融合视觉锚点与 EKF 预测）
-3. 增加运动模型适应性（静止时降低过程噪声）
+职责：
+1. 维护跟随目标的状态估计: [x, y, vx, vy] (世界坐标系)
+2. 融合来自视觉和LiDAR的观测
+3. 在无观测时做预测 (匀速模型)
+4. 关联LiDAR检测到的人物候选与视觉检测到的目标
+5. 输出目标的世界坐标、速度、预测位置
 """
 import math
 import time
@@ -54,7 +56,7 @@ class SensorFusion:
         # 状态向量: [x, y, vx, vy]
         self._state = np.zeros(4)
         
-        # 协方差矩阵
+        # 协方差矩阵 (初始不确定度较大)
         self._P = np.eye(4) * 10.0
         
         self._last_time: float = 0.0
@@ -88,9 +90,7 @@ class SensorFusion:
         
         dt = detection.timestamp - self._last_time
         if dt > 0:
-            # 根据目标速度调整过程噪声（静止时降低）
-            process_noise_scale = self._compute_process_noise_scale()
-            self._predict(dt, process_noise_scale)
+            self._predict(dt)
         
         z = np.array([detection.world_x, detection.world_y])
         R = np.eye(2) * EKF_MEASUREMENT_NOISE_VISION
@@ -107,8 +107,7 @@ class SensorFusion:
         
         dt = candidate.timestamp - self._last_time
         if dt > 0:
-            process_noise_scale = self._compute_process_noise_scale()
-            self._predict(dt, process_noise_scale)
+            self._predict(dt)
         
         z = np.array([candidate.world_x, candidate.world_y])
         R = np.eye(2) * EKF_MEASUREMENT_NOISE_LIDAR
@@ -124,8 +123,7 @@ class SensorFusion:
         
         dt = timestamp - self._last_time
         if dt > 0:
-            process_noise_scale = self._compute_process_noise_scale()
-            self._predict(dt, process_noise_scale)
+            self._predict(dt)
             self._last_time = timestamp
             self._coast_time += dt
     
@@ -143,9 +141,6 @@ class SensorFusion:
         pred_x = x + vx * prediction_horizon
         pred_y = y + vy * prediction_horizon
         
-        # 计算速度方差
-        speed_variance = self.get_speed_variance()
-        
         return TargetState(
             x=x, y=y, vx=vx, vy=vy,
             speed=speed, heading=heading,
@@ -154,7 +149,7 @@ class SensorFusion:
             last_lidar_time=self._last_lidar_time,
             last_any_time=max(self._last_vision_time, self._last_lidar_time),
             predicted_x=pred_x, predicted_y=pred_y,
-            speed_variance=speed_variance,
+            speed_variance=self.get_speed_variance(),
         )
     
     def set_vision_anchor(self, world_x: float, world_y: float):
@@ -164,48 +159,21 @@ class SensorFusion:
     def associate_lidar_candidates(self, candidates: List[PersonCandidate],
                                     gate_distance: float = 0.8
                                     ) -> Optional[PersonCandidate]:
-        """
-        改进的 LiDAR 关联：
-        - 优先使用新鲜视觉锚点（<0.5s）
-        - 若锚点与 EKF 预测接近，取两者平均
-        - 否则以 EKF 预测为中心（若 EKF 有效），或锚点（若无 EKF）
-        """
         if not self._initialized or len(candidates) == 0:
             return None
         
         now = time.time()
-        
-        # 确定关联中心
+
         anchor = self._vision_anchor
         anchor_time = self._vision_anchor_time
-        
-        ekf_x, ekf_y = self._state[0], self._state[1]
-        ekf_valid = self._initialized
-        
-        # 情况 1：有新鲜锚点 (<0.5s) 且 EKF 有效
-        if anchor is not None and (now - anchor_time) < 0.5 and ekf_valid:
-            dist_anchor_ekf = math.hypot(anchor[0] - ekf_x, anchor[1] - ekf_y)
-            if dist_anchor_ekf < 0.6:
-                # 锚点与 EKF 一致，取平均
-                cx = (anchor[0] + ekf_x) / 2
-                cy = (anchor[1] + ekf_y) / 2
-            else:
-                # 差异大，优先相信新鲜锚点
-                cx, cy = anchor
-        elif anchor is not None and (now - anchor_time) < 1.0:
-            # 锚点较新（<1s），使用锚点
+        if anchor is not None and (now - anchor_time) < 1.0:
             cx, cy = anchor
-        elif ekf_valid:
-            # 无锚点或锚点过旧，使用 EKF 位置
-            cx, cy = ekf_x, ekf_y
         else:
-            # 都没有，无法关联
-            return None
-        
-        # 动态门控：coasting 时放宽
+            cx, cy = self._state[0], self._state[1]
+
         effective_gate = gate_distance
-        if self._coast_time > 0.5:
-            effective_gate = min(gate_distance + self._coast_time * 0.3, 1.8)
+        if self._coast_time > 0.3:
+            effective_gate = min(gate_distance + self._coast_time * 0.3, 1.5)
         
         best_candidate = None
         best_dist = float('inf')
@@ -233,27 +201,13 @@ class SensorFusion:
         self._initialized = False
         self._coast_time = 0.0
         self._vision_anchor = None
+        self._vision_anchor_time = 0.0
         print("[SensorFusion] 跟踪器已重置")
     
     # =====================================================================
     # EKF 内部实现
     # =====================================================================
-    def _compute_process_noise_scale(self) -> float:
-        """
-        根据当前估计速度调整过程噪声缩放因子。
-        目标静止时降低过程噪声，避免漂移。
-        """
-        if not self._initialized:
-            return 1.0
-        speed = math.hypot(self._state[2], self._state[3])
-        if speed < 0.1:
-            return 0.3   # 静止时降低噪声
-        elif speed < 0.5:
-            return 0.7
-        else:
-            return 1.0
-    
-    def _predict(self, dt: float, noise_scale: float = 1.0):
+    def _predict(self, dt: float):
         F = np.array([
             [1, 0, dt, 0],
             [0, 1, 0, dt],
@@ -265,8 +219,8 @@ class SensorFusion:
         dt3 = dt2 * dt / 2.0
         dt4 = dt2 * dt2 / 4.0
         
-        q_pos = EKF_PROCESS_NOISE_POS * noise_scale
-        q_vel = EKF_PROCESS_NOISE_VEL * noise_scale
+        q_pos = EKF_PROCESS_NOISE_POS
+        q_vel = EKF_PROCESS_NOISE_VEL
         
         Q = np.array([
             [dt4 * q_pos, 0,           dt3 * q_pos, 0          ],
