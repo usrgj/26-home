@@ -74,4 +74,9 @@ def get_face_center_from_body_bbox(bbox, k=0.15):
     cy = int(y1 + k * H)
     return cx, cy
 
+<<<<<<< HEAD
 
+=======
+if __name__ == "__main__":
+    main()
+>>>>>>> dev

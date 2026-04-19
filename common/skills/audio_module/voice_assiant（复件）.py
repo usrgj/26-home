@@ -2,15 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-<<<<<<< HEAD
 Multi-language Voice Assistant with Doorbell Detection (Local YAMNet)
 Supports manual Enter key fallback.
 Language controlled by common.config.LANGUAGE ('en' or 'zh').
-=======
-English Voice Assistant with Doorbell Detection (Local YAMNet)
-Supports manual Enter key fallback.
-Added: AGC, high-pass filter, fuzzy drink matching.
->>>>>>> dev
 """
 
 import time
@@ -31,14 +25,6 @@ import webrtcvad
 import spacy
 import sys
 import select
-from difflib import get_close_matches
-from pathlib import Path
-
-# ------------------ Import language config ------------------
-# 添加项目根目录到 sys.path，以便导入 common.config
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(PROJECT_ROOT))
-from common.config import LANGUAGE, COMMON_DRINKS
 
 # ------------------ Import language config ------------------
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -65,16 +51,11 @@ MAX_RECORD_DURATION_MS = 10000
 RING_BUFFER_MAXLEN = int(1000 / FRAME_DURATION_MS)
 MAX_LOW_ENERGY_FRAMES = 30
 
-<<<<<<< HEAD
 # 缓存目录改为当前文件所在目录下的 audio_cache
-=======
-# 缓存目录
->>>>>>> dev
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 TTS_CACHE_DIR = os.path.join(CURRENT_DIR, "audio_cache")
 os.makedirs(TTS_CACHE_DIR, exist_ok=True)
 
-<<<<<<< HEAD
 # 多语言文本和列表
 if LANGUAGE == "en":
     COMMON_DRINKS = [
@@ -97,18 +78,10 @@ if LANGUAGE == "en":
     FALLBACK_DRINK = "Water"
 else:
     COMMON_DRINKS = [
-=======
-# 饮料列表（用于模糊匹配）
-if LANGUAGE == "en":
-    COMMON_DRINKS_LIST = COMMON_DRINKS  # 从 config 导入的英文列表
-else:
-    COMMON_DRINKS_LIST = [
->>>>>>> dev
         "可乐", "雪碧", "芬达", "美年达", "七喜", "果汁", "橙汁", "苹果汁",
         "牛奶", "酸奶", "水", "矿泉水", "茶", "红茶", "绿茶", "乌龙茶",
         "咖啡", "拿铁", "卡布奇诺", "啤酒", "红酒"
     ]
-<<<<<<< HEAD
     PROMPT_NAME = "你好，欢迎来到派对！请问你叫什么名字？"
     PROMPT_NAME_RETRY = "抱歉，我没听清你的名字，能再说一遍吗？"
     PROMPT_DRINK = "你最喜欢的饮料是什么？"
@@ -123,10 +96,6 @@ else:
     FALLBACK_DRINK = "水"
 
 # Load NLP model (only for English name extraction; Chinese uses regex)
-=======
-
-# 加载英文 NLP 模型（仅在英文模式下）
->>>>>>> dev
 if LANGUAGE == "en":
     try:
         nlp = spacy.load("en_core_web_sm")
@@ -135,18 +104,11 @@ if LANGUAGE == "en":
         subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
         nlp = spacy.load("en_core_web_sm")
 else:
-<<<<<<< HEAD
     nlp = None  # Chinese name extraction uses regex only
 
 # ------------------ Helper Functions ------------------
 def extract_name(text):
     """Extract person name from text (supports English and Chinese)."""
-=======
-    nlp = None
-
-# ------------------ 名字和饮料提取（带模糊匹配） ------------------
-def extract_name_en(text):
->>>>>>> dev
     if not text:
         return None
     if LANGUAGE == "en" and nlp:
@@ -174,7 +136,6 @@ def extract_name_en(text):
     words = re.findall(r'[\u4e00-\u9fff]+|[A-Z][a-z]+', text)
     return words[0] if words else None
 
-<<<<<<< HEAD
 def extract_drink(text):
     """Extract drink name from text using COMMON_DRINKS."""
     if not text:
@@ -185,57 +146,6 @@ def extract_drink(text):
             return drink
     return None
 
-=======
-def extract_name_zh(text):
-    if not text:
-        return None
-    patterns = [
-        r'(?:我叫|我是|名字是|姓名是|本人叫|本人是)\s*([^\s，。、]+)',
-        r'叫\s*([^\s，。、]+)',
-        r'^([^\s，。、]{2,4})$',
-    ]
-    for p in patterns:
-        m = re.search(p, text)
-        if m:
-            return m.group(1)
-    words = re.findall(r'[\u4e00-\u9fff]+', text)
-    return words[-1] if words else None
-
-def extract_drink_en(text):
-    if not text:
-        return None
-    text_lower = text.lower()
-    # 直接匹配
-    for drink in COMMON_DRINKS_LIST:
-        if drink in text_lower:
-            return drink.capitalize()
-    # 模糊匹配
-    matches = get_close_matches(text_lower, COMMON_DRINKS_LIST, n=1, cutoff=0.6)
-    if matches:
-        return matches[0].capitalize()
-    return None
-
-def extract_drink_zh(text):
-    if not text:
-        return None
-    for drink in COMMON_DRINKS_LIST:
-        if drink in text:
-            return drink
-    matches = get_close_matches(text, COMMON_DRINKS_LIST, n=1, cutoff=0.6)
-    if matches:
-        return matches[0]
-    return None
-
-# 根据语言绑定函数
-if LANGUAGE == "en":
-    extract_name = extract_name_en
-    extract_drink = extract_drink_en
-else:
-    extract_name = extract_name_zh
-    extract_drink = extract_drink_zh
-
-# ------------------ 辅助函数 ------------------
->>>>>>> dev
 def wait_for_doorbell_with_fallback(detector):
     print("Waiting for doorbell... (Press Enter to manually trigger)" if LANGUAGE == "en" else "等待门铃... (按 Enter 手动触发)")
     while True:
@@ -344,14 +254,10 @@ class DoorbellDetector:
     def wait_for_doorbell(self, timeout=None):
         return self.doorbell_detected.wait(timeout)
 
-<<<<<<< HEAD
 # ------------------ VoiceAssistant Class (only online TTS, MP3 playback) ------------------
-=======
-# ------------------ VoiceAssistant Class (with AGC and HPF) ------------------
->>>>>>> dev
 class VoiceAssistant:
     def __init__(self):
-        self.vad = webrtcvad.Vad(3)   # 高灵敏度
+        self.vad = webrtcvad.Vad(3)
         self.audio = pyaudio.PyAudio()
         self.stream = None
         self.noise_floor = 500.0
@@ -369,10 +275,7 @@ class VoiceAssistant:
 
     def _play_mp3(self, file_path):
         if not self._mpg123_available:
-<<<<<<< HEAD
             print("[播放错误] mpg123 not installed")
-=======
->>>>>>> dev
             return False
         try:
             subprocess.run(['mpg123', '-q', file_path], check=True, timeout=10)
@@ -385,33 +288,6 @@ class VoiceAssistant:
     def _get_cache_path(self, text):
         return os.path.join(TTS_CACHE_DIR, hashlib.md5(text.encode()).hexdigest() + ".mp3")
 
-    # ---------- 自动增益控制 ----------
-    def _apply_agc(self, audio_int16, target_rms=8000):
-        if len(audio_int16) == 0:
-            return audio_int16
-        rms = np.sqrt(np.mean(audio_int16.astype(np.float32)**2))
-        if rms < 1e-6:
-            return audio_int16
-        gain = target_rms / rms
-        gain = np.clip(gain, 0.3, 3.0)
-        audio_float = audio_int16.astype(np.float32) * gain
-        audio_float = np.clip(audio_float, -32768, 32767)
-        return audio_float.astype(np.int16)
-
-    # ---------- 高通滤波（去除低频噪音） ----------
-    def _highpass_filter(self, audio_int16, cutoff_hz=80, sample_rate=16000):
-        if len(audio_int16) < 2:
-            return audio_int16
-        rc = 1.0 / (2 * np.pi * cutoff_hz)
-        dt = 1.0 / sample_rate
-        alpha = rc / (rc + dt)
-        x = audio_int16.astype(np.float32)
-        y = np.zeros_like(x)
-        for i in range(1, len(x)):
-            y[i] = alpha * (y[i-1] + x[i] - x[i-1])
-        return y.astype(np.int16)
-
-    # ---------- 预加载 ----------
     def preload_tts(self, text):
         cache_path = self._get_cache_path(text)
         if os.path.exists(cache_path):
@@ -427,36 +303,14 @@ class VoiceAssistant:
             print(f"[Preload] Error: {e}")
 
     def preload_common_phrases(self):
-<<<<<<< HEAD
         common_texts = [
             PROMPT_NAME, PROMPT_NAME_RETRY,
             PROMPT_DRINK, PROMPT_DRINK_RETRY,
             SEAT_GUIDE, SEAT_HERE, THANK_YOU
         ]
-=======
-        if LANGUAGE == "en":
-            common_texts = [
-                "Hello, welcome to the party! What's your name?",
-                "Sorry, I didn't catch your name. Could you say it again?",
-                "What's your favorite drink?",
-                "Sorry, I didn't catch that. What's your favorite drink?",
-                "Great. Please have a seat.",
-                "Thank you both for coming! Enjoy the party."
-            ]
-        else:
-            common_texts = [
-                "你好，欢迎来到派对！请问你叫什么名字？",
-                "抱歉，我没听清你的名字，能再说一遍吗？",
-                "你最喜欢的饮料是什么？",
-                "抱歉，我没听清你喜欢的饮料，能再说一次吗？",
-                "好的，请坐。",
-                "感谢两位的光临！祝你们玩得开心。"
-            ]
->>>>>>> dev
         for text in common_texts:
             threading.Thread(target=self.preload_tts, args=(text,), daemon=True).start()
 
-    # ---------- 录音控制 ----------
     def set_recording(self, state):
         if state == 1:
             if self.stream is None:
@@ -485,24 +339,18 @@ class VoiceAssistant:
                     except:
                         pass
 
-    # ---------- 语音合成 ----------
     def speak(self, text):
         print(f"[Robot]: {text}")
         self.set_recording(2)
         cache_path = self._get_cache_path(text)
-
         if os.path.exists(cache_path):
             if self._play_mp3(cache_path):
                 self.set_recording(3)
                 return
             else:
                 os.remove(cache_path)
-<<<<<<< HEAD
-=======
-
->>>>>>> dev
         try:
-            resp = requests.post(TTS_URL, json={"input": text, "speed": 1.0}, timeout=5)
+            resp = requests.post(TTS_URL, json={"model": "tts-1", "input": text, "voice": "alloy", "speed": 1.0}, timeout=5)
             if resp.status_code == 200:
                 with open(cache_path, 'wb') as f:
                     f.write(resp.content)
@@ -513,18 +361,10 @@ class VoiceAssistant:
                 print(f"[在线 TTS 错误] 状态码 {resp.status_code}")
         except Exception as e:
             print(f"[在线 TTS 异常] {e}")
-<<<<<<< HEAD
         self.set_recording(3)
         print(f"[TTS Failed] Could not play: {text}")
 
     # 降噪、录音、识别等方法保持不变（与语言无关）
-=======
-
-        self.set_recording(3)
-        print(f"[TTS Failed] Could not play: {text}")
-
-    # ---------- 降噪 ----------
->>>>>>> dev
     def update_noise_floor(self, frame_energy, is_speech_vad):
         if not is_speech_vad:
             self.energy_history.append(frame_energy)
@@ -554,25 +394,20 @@ class VoiceAssistant:
         except:
             return audio_frames
 
-    # ---------- 语音识别（增强版：AGC + 高通滤波） ----------
+    def _cleanup_temp_files(self, max_files=50):
+        temp_dir = "temp_audio"
+        os.makedirs(temp_dir, exist_ok=True)
+        try:
+            files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if f.endswith('.wav')]
+            if len(files) > max_files:
+                files.sort(key=os.path.getmtime)
+                for f in files[:-max_files]:
+                    os.remove(f)
+        except:
+            pass
+
     def recognize(self, audio_frames):
         denoised = self.denoise(audio_frames)
-        if not denoised:
-            return ""
-
-        # 合并为字节数组，转为 int16
-        audio_bytes = b''.join(denoised)
-        audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
-
-        # 高通滤波（去除低频风扇/电机噪音）
-        audio_int16 = self._highpass_filter(audio_int16)
-        # 自动增益控制
-        audio_int16 = self._apply_agc(audio_int16)
-
-        # 重新分割为帧（用于保存临时文件）
-        frame_size = CHUNK * 2
-        frames = [audio_int16[i:i+frame_size].tobytes() for i in range(0, len(audio_int16), frame_size) if len(audio_int16[i:i+frame_size]) == frame_size]
-
         temp_dir = "temp_audio"
         os.makedirs(temp_dir, exist_ok=True)
         timestamp = int(time.time() * 1000)
@@ -581,9 +416,8 @@ class VoiceAssistant:
         wf.setnchannels(CHANNELS)
         wf.setsampwidth(self.audio.get_sample_size(FORMAT))
         wf.setframerate(RATE)
-        wf.writeframes(b''.join(frames))
+        wf.writeframes(b''.join(denoised))
         wf.close()
-
         try:
             with open(temp_path, 'rb') as af:
                 resp = requests.post(ASR_URL, files={"audio": ("audio.wav", af, "audio/wav")}, timeout=5)
@@ -610,7 +444,6 @@ class VoiceAssistant:
                 pass
         return ""
 
-    # ---------- 录音 ----------
     def record(self):
         if self.stream is None:
             return []
@@ -655,27 +488,14 @@ class VoiceAssistant:
                 break
         return frames
 
-    # ---------- 临时文件清理 ----------
-    def _cleanup_temp_files(self, max_files=50):
-        temp_dir = "temp_audio"
-        os.makedirs(temp_dir, exist_ok=True)
-        try:
-            files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if f.endswith('.wav')]
-            if len(files) > max_files:
-                files.sort(key=os.path.getmtime)
-                for f in files[:-max_files]:
-                    os.remove(f)
-        except:
-            pass
-
-    # ---------- 关闭资源 ----------
     def close(self):
         self.set_recording(0)
         self.audio.terminate()
 
-# ------------------ 全局实例和兼容接口 ------------------
+# ------------------ Compatibility aliases for state machine ------------------
 VoiceAssistant.record_utterance = VoiceAssistant.record
 
+# 创建全局实例（单例）
 voice_assistant = VoiceAssistant()
 doorbell = DoorbellDetector()
 
@@ -685,7 +505,6 @@ def get_voice_assistant():
 def create_doorbell_detector(threshold=0.5, chunk_seconds=1.0):
     return DoorbellDetector(threshold, chunk_seconds)
 
-# ------------------ 主函数（独立测试） ------------------
 def main():
     try:
         doorbell = DoorbellDetector(threshold=0.5)
@@ -697,11 +516,7 @@ def main():
     assistant = VoiceAssistant()
     assistant.set_recording(0)
 
-<<<<<<< HEAD
     print("等待门铃... (按 Enter 手动触发)" if LANGUAGE == "en" else "等待门铃... (按 Enter 手动触发)")
-=======
-    print("等待门铃... (按 Enter 手动触发)")
->>>>>>> dev
     if doorbell:
         wait_for_doorbell_with_fallback(doorbell)
     else:
@@ -709,7 +524,6 @@ def main():
 
     assistant.set_recording(1)
 
-<<<<<<< HEAD
     name1 = ask_info(assistant,
                      PROMPT_NAME,
                      extract_name,
@@ -725,36 +539,6 @@ def main():
     assistant.set_recording(0)
 
     print("等待第二位客人门铃... (按 Enter 手动触发)" if LANGUAGE == "en" else "等待第二位客人门铃... (按 Enter 手动触发)")
-=======
-    if LANGUAGE == "en":
-        name1 = ask_info(assistant,
-                         "Hello, welcome to the party! What's your name?",
-                         extract_name,
-                         "Sorry, I didn't catch your name. Could you say it again?",
-                         "Friend")
-        drink1 = ask_info(assistant,
-                          f"{name1}, what's your favorite drink?",
-                          extract_drink,
-                          "Sorry, I didn't catch that. What's your favorite drink?",
-                          "Water")
-        assistant.speak(f"Great, {name1}. Please have a seat.")
-    else:
-        name1 = ask_info(assistant,
-                         "你好，欢迎来到派对！请问你叫什么名字？",
-                         extract_name,
-                         "抱歉，我没听清你的名字，能再说一遍吗？",
-                         "朋友")
-        drink1 = ask_info(assistant,
-                          f"{name1}，你最喜欢的饮料是什么？",
-                          extract_drink,
-                          "抱歉，我没听清你喜欢的饮料，能再说一次吗？",
-                          "水")
-        assistant.speak(f"好的，{name1}，请坐。")
-
-    assistant.set_recording(0)
-
-    print("等待第二位客人门铃... (按 Enter 手动触发)")
->>>>>>> dev
     if doorbell:
         wait_for_doorbell_with_fallback(doorbell)
     else:
@@ -762,7 +546,6 @@ def main():
 
     assistant.set_recording(1)
 
-<<<<<<< HEAD
     name2 = ask_info(assistant,
                      PROMPT_NAME,
                      extract_name,
@@ -778,38 +561,6 @@ def main():
     assistant.speak(INTRO_TEMPLATE.format(listener=name2, subject=name1, drink=drink1))
     assistant.speak(INTRO_RESPONSE.format(listener=name1, subject=name2, drink=drink2))
     assistant.speak(THANK_YOU)
-=======
-    if LANGUAGE == "en":
-        name2 = ask_info(assistant,
-                         "Hello, welcome to the party! What's your name?",
-                         extract_name,
-                         "Sorry, I didn't catch your name. Could you say it again?",
-                         "Friend")
-        drink2 = ask_info(assistant,
-                          f"{name2}, what's your favorite drink?",
-                          extract_drink,
-                          "Sorry, I didn't catch that. What's your favorite drink?",
-                          "Water")
-        assistant.speak(f"Great, {name2}. Please have a seat.")
-        assistant.speak(f"{name2}, let me introduce {name1}, who likes to drink {drink1}.")
-        assistant.speak(f"{name1}, this is {name2}, who likes to drink {drink2}.")
-        assistant.speak("Thank you both for coming! Enjoy the party.")
-    else:
-        name2 = ask_info(assistant,
-                         "你好，欢迎来到派对！请问你叫什么名字？",
-                         extract_name,
-                         "抱歉，我没听清你的名字，能再说一遍吗？",
-                         "朋友")
-        drink2 = ask_info(assistant,
-                          f"{name2}，你最喜欢的饮料是什么？",
-                          extract_drink,
-                          "抱歉，我没听清你喜欢的饮料，能再说一次吗？",
-                          "水")
-        assistant.speak(f"好的，{name2}，请坐。")
-        assistant.speak(f"{name2}，让我介绍{name1}，他喜欢喝{drink1}。")
-        assistant.speak(f"{name1}，这位是{name2}，他喜欢喝{drink2}。")
-        assistant.speak("感谢两位的光临！祝你们玩得开心。")
->>>>>>> dev
 
     assistant.close()
     if doorbell:

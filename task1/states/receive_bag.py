@@ -53,7 +53,7 @@ class ReceiveBag(State):
         voice_assistant.speak(speak_text)
 
         # 3. 机械臂到接包位置，夹爪张开
-        print(left_arm.rm_movej([-132.172,-69.632,-27.875,96.759,-5.229,-244.059], 20, 0, 0, 1))
+        print(left_arm.rm_movej([-83.018,-42.675,-73.002,-16.54,-29.304,52.168], 20, 0, 0, 1))
         left_gripper.open()
         time.sleep(7)
 
@@ -63,4 +63,8 @@ class ReceiveBag(State):
 
         ctx.bag_received = True
 
+<<<<<<< HEAD
         return "follow_and_place"
+=======
+        return "follow_and_place"
+>>>>>>> dev

@@ -33,6 +33,7 @@ from common.skills.head_control import pan_tilt
 from common.state_machine import State
 from task1 import config
 from task1.behaviors.vision.client import analyze_person_features
+<<<<<<< HEAD
 
 # 导入语言配置
 import sys
@@ -41,6 +42,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]  # 向上2级到 26-home
 sys.path.insert(0, str(PROJECT_ROOT))
 from common.config import LANGUAGE
 
+=======
+from task1.behaviors.vision import (GazeAPI,SeatManager)
+>>>>>>> dev
 log = logging.getLogger("task1.receive_guest")
 
 _DEFAULT_DETECTION_CONF = 0.35
@@ -81,23 +85,48 @@ class FeatureExtractionJob:
 
 class ReceiveGuest(State):
     def __init__(self):
+        self.gaze_api = GazeAPI('yolov8n.pt')
         self._model: YOLO | None = None
         self._cam_head = camera_manager.get(CAMERA_HEAD)
         self._feature_jobs: dict[int, FeatureExtractionJob] = {}
+        seat_coords_1 = [seat["box1"] for seat in config.SEATS if any(seat["box1"])]
+        seat_coords_2 = [seat["box2"] for seat in config.SEATS if any(seat["box2"])]
+        self.seat_manager_1 = SeatManager(seat_coords_1, min_empty=2)
+        self.seat_manager_2 = SeatManager(seat_coords_2, min_empty=2)
 
     def execute(self, ctx) -> str:
         model = self._get_model()
         self._feature_jobs = {}
-
         voice_assistant.set_recording(1)
-
         while ctx.current_guest_index < len(ctx.guests):
 
             agv.navigate_to(agv.get_current_station(), config.STATION_START)
             wait_nav(timeout=config.NAV_TIMEOUT)
 
             pan_tilt.home()
+<<<<<<< HEAD
             _observe_visible_seats(ctx, model, self._cam_head, box_key="box1")
+=======
+
+            # ==== 空座位识别能力接口调用 START ====
+            seat_coords = [seat["box1"] for seat in config.SEATS if any(seat["box1"])]
+            if not hasattr(self, "seat_manager"):
+                self.seat_manager = SeatManager(seat_coords, min_empty=2)
+
+            for _ in range(3):
+                color_frame, _ = self._cam_head.get_frames()
+                if color_frame is None:
+                    continue
+                person_boxes = self.gaze_api.detect_persons(color_frame)
+                self.seat_manager.update_from_detections(person_boxes)
+                time.sleep(0.08)
+
+            seat_status = self.seat_manager.seat_status
+            print("当前座位状态:", seat_status)
+            empty_indices = [i for i, s in enumerate(seat_status) if s == "empty"]
+            print("当前空座位编号：", empty_indices)
+            # ==== 空座位识别能力接口调用 END ====
+>>>>>>> dev
 
             guest_index = ctx.current_guest_index
             guest = ctx.current_guest
@@ -115,15 +144,7 @@ class ReceiveGuest(State):
             wait_nav(timeout=config.NAV_TIMEOUT)
 
             # 注视
-            gaze_stop_event = threading.Event()
-            gaze_thread = threading.Thread(
-                target=_gaze_loop,
-                args=(gaze_stop_event, model, self._cam_head, pan_tilt),
-                name=f"gaze_guest_{guest_index}",
-                daemon=True,
-            )
-            gaze_thread.start()
-
+            gaze_thread, gaze_stop_event = self.gaze_api.start_gaze_tracking_nearest_person(pan_tilt, self._cam_head, duration=45)
             # 询问姓名和喜爱饮品，同时在后台提取视觉特征
             try:
                 guest.name = _ask_guest_name()
@@ -137,7 +158,14 @@ class ReceiveGuest(State):
 
                 guest.favorite_drink = _ask_guest_drink()
             finally:
+<<<<<<< HEAD
                 _stop_gaze_thread(gaze_stop_event, gaze_thread) 
+=======
+                # 结束注视
+                gaze_stop_event.set()
+                gaze_thread.join()
+                pan_tilt.home()#回中
+>>>>>>> dev
 
             # 导航到空位置
             seat_id = ctx.find_free_seat()
@@ -194,6 +222,11 @@ class ReceiveGuest(State):
 
 def _ask_guest_name() -> str:
     """通过语音询问并提取客人姓名。"""
+<<<<<<< HEAD
+=======
+    prompt = "hello，welcome to my home,what is your name?"
+
+>>>>>>> dev
     for attempt in range(config.ASK_RETRIES):
         voice_assistant.speak(PROMPT_NAME if attempt == 0 else PROMPT_NAME_RETRY)
         recognized_text = _record_and_recognize_text()
@@ -207,6 +240,28 @@ def _ask_guest_name() -> str:
     log.warning("未能提取到客人姓名")
     return ""
 
+<<<<<<< HEAD
+=======
+
+def _ask_guest_drink() -> str:
+    """通过语音询问并提取客人喜爱饮品。"""
+    prompt = "what is your favourite drink?"
+
+    for attempt in range(config.ASK_RETRIES):
+        voice_assistant.speak(prompt)
+        recognized_text = _record_and_recognize_text()
+        if recognized_text:
+            log.info("饮品语音识别结果: %s", recognized_text)
+        drink = _extract_favorite_drink(recognized_text)
+        if drink:
+            log.info("提取到饮品: %s", drink)
+            return drink
+
+    log.warning("未能提取到客人饮品")
+    return ""
+
+
+>>>>>>> dev
 def _record_and_recognize_text() -> str:
     audio_frames = voice_assistant.record_utterance()
     if not audio_frames:
