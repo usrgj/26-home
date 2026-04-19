@@ -10,8 +10,9 @@ from common.skills.agv_api import agv
 from common.skills.arm import left_arm, right_arm, left_gripper, right_gripper
 from common.skills.head_control import pan_tilt
 from common.skills.camera import camera_manager as cams
-
 from common.skills.audio_module import voice_assistant, doorbell, extract_name
+
+
 
 from common.config import CAMERA_HEAD, CAMERA_CHEST, CAMERA_LEFT, CAMERA_RIGHT
 from task1.config import LEFT_HOME_JOINTS, RIGHT_HOME_JOINTS, ARM_SPEED
@@ -43,6 +44,11 @@ class InitAndWait(State):
 
         # 云台回中
         pan_tilt.home()
+        
+        # 打开相机画面
+        from task1.behaviors.show import head_viewer, chest_viewer
+        head_viewer.start()
+        chest_viewer.start()
 
 
         input("[状态0] 硬件就绪，按 Enter 开始比赛...")
