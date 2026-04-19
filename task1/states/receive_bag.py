@@ -27,10 +27,6 @@ class ReceiveBag(State):
 
     def execute(self, ctx) -> str:
         
-        # ── 1. 导航到第二位客人 ────────────────────────
-        # ── 2. 请求递包 ────────────────────────
-        # ── 3. 接包 ────────────────────────
-
         # 根据语言选择提示语
         if LANGUAGE == "en":
             speak_text = "Please hand me the bag, I will take it for you."
@@ -38,16 +34,11 @@ class ReceiveBag(State):
             speak_text = "请把包递给我，我来帮你拿。"
 
         # 1. 面向第二位客人
-        target_angle = config.INTRO_LOOK_ANGLES_DEG.get(agv.get_current_station(), {}).get(ctx.guests[1].seat_id)
-        pose = agv.get_pose()
-        if pose is None:
-            print("无法获取机器人位姿，跳过底盘转向")
-        try:
-            x = float(pose["x"])
-            y = float(pose["y"])
-            agv.free_navigate_to(x, y, math.radians(target_angle))
-        except (KeyError, TypeError, ValueError) as exc:
-            print("机器人位姿不完整，跳过底盘转向: %s", exc)
+        target_degree = config.INTRO_LOOK_ANGLES_DEG.get(agv.get_current_station(), {}).get(ctx.guests[1].seat_id)
+        angle = math.radians(target_degree)
+        
+        agv.navigate_to(agv.get_current_station(), agv.get_current_station(), angle=angle)
+
 
         # 2. 请求递包
         voice_assistant.speak(speak_text)

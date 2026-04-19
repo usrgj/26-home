@@ -178,7 +178,7 @@ class AGVApi:
 
         :param source:  导航起始点 id
         :param target:  导航目标点 id
-        :param angle:   目标点偏航角度 ,可缺省
+        :param angle:   世界坐标中的姿态 rad ,可缺省
         """
         if angle != "":
             return self._query_data(_NAV, "0BEB", {

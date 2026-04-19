@@ -41,7 +41,7 @@ AUDIO_MAX_RECORD_S = 10
 AUDIO_SILENCE_MS = 1500
 
 # 全局语言设置，影响 ASR 热词和 TTS 语言。赛前根据需要改成 "zh" 或 "en"。
-LANGUAGE = "en"
+LANGUAGE = "zh"
 
 # 英文饮料列表，用于 ASR 热词和模糊匹配。
 COMMON_DRINKS = [
