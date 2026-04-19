@@ -4,8 +4,8 @@ from ultralytics import YOLO
 from .gaze_tracking import get_person_direction  
 
 class GazeAPI:
-    def __init__(self, model_path='yolov8n.pt'):
-        self.model = YOLO(model_path)
+    def __init__(self, model: YOLO):
+        self.model = model
 
     def detect_persons(self, frame, conf=0.5):
         """返回当前帧的所有人体框 [(x1, y1, x2, y2), ...]"""
@@ -48,11 +48,9 @@ class GazeAPI:
                     if not ret:
                         frame = None
                 if frame is None:
-                    time.sleep(0.1)
                     continue
                 bboxes = self.detect_persons(frame)
                 if not bboxes:
-                    time.sleep(0.1)
                     continue
                 bbox = max(bboxes, key=lambda b: (b[2]-b[0])*(b[3]-b[1]))
                 ctrl = get_person_direction(bbox, frame.shape[1], frame.shape[0])
@@ -70,7 +68,7 @@ class GazeAPI:
                     else:
                         current_pos_v += step
                     head_controller.rotate_vertical(current_pos_v)
-                time.sleep(0.1)
+                time.sleep(0.05)
             print("✓ 最近人体追踪线程结束")
         t = threading.Thread(target=worker, daemon=True)
         t.start()

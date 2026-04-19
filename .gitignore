@@ -14,3 +14,4 @@ pids/
 *.pt
 *.mp3
 models/
+cache/

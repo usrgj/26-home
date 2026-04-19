@@ -173,6 +173,13 @@ class AGVApi:
         return data is not None and data.get("ret_code") == 0
     
     def navigate_to(self, source: str, target: str, angle: float = "") -> dict | None :
+        """
+        导航到目标点
+
+        :param source:  导航起始点 id
+        :param target:  导航目标点 id
+        :param angle:   目标点偏航角度 ,可缺省
+        """
         if angle != "":
             return self._query_data(_NAV, "0BEB", {
                 "source_id": source,

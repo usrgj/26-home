@@ -19,33 +19,6 @@ CAMERA_CHEST = "151222073707"
 CAMERA_LEFT  = "141722075710"
 CAMERA_RIGHT = "239722070896"
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  语音模块服务地址
-# ═══════════════════════════════════════════════════════════════════════════
-ASR_URL      = "http://127.0.0.1:8001/api/speech_recognition"
-TTS_URL      = "http://127.0.0.1:8002/v1/audio/speech"
+LANGUAGE = "en" # 全局语言设置，影响 ASR 热词和 TTS 语言。赛前根据需要改成 "zh" 或 "en"。
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  TTS 服务（Edge-TTS）
-# ═══════════════════════════════════════════════════════════════════════════
-TTS_VOICE     = "zh-CN-XiaoxiaoNeural"
-TTS_CACHE_DIR = "../audio_cache"
-LANGUAGE = "en"
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  录音参数
-# ═══════════════════════════════════════════════════════════════════════════
-AUDIO_SAMPLE_RATE  = 16000
-AUDIO_CHANNELS     = 1
-AUDIO_FRAME_MS     = 30      # VAD 帧长（毫秒）
-AUDIO_MAX_RECORD_S = 10      # 单次最大录音时长（秒）
-AUDIO_SILENCE_MS   = 1500    # 静音超时（毫秒）
-# ═══════════════════════════════════════════════════════════════════════════
-# 饮料列表（英文，用于 ASR 热词和模糊匹配）
-# ═══════════════════════════════════════════════════════════════════════════
-COMMON_DRINKS = [
-    "coke", "coca cola", "pepsi", "sprite", "fanta", "7up", "juice", "orange juice",
-    "apple juice", "milk", "yogurt", "water", "mineral water", "tea", "black tea",
-    "green tea", "oolong tea", "coffee", "latte", "cappuccino", "beer", "wine",
-    "red wine", "white wine", "cocktail", "lemonade", "soda"
-]
