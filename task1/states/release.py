@@ -7,7 +7,8 @@ from Robotic_Arm.rm_robot_interface import *
 from common.state_machine import State
 from common.skills.slide_control import slide_control
 from common.skills.agv_api import agv
-from common.skills.arm import left_arm, right_arm, Gripper, IOGripper, GripperError, IOGripperError
+# from common.skills.arm import left_arm, right_arm, Gripper, IOGripper, GripperError, IOGripperError
+from common.skills.arm import left_arm,  Gripper, IOGripper, GripperError, IOGripperError
 from common.skills.head_control import pan_tilt
 from common.skills.camera import camera_manager as cams
 from task1.behaviors.show import viewer
@@ -37,7 +38,7 @@ class Release(State):
 
         try:
             left_arm.rm_movej(LEFT_HOME_JOINTS, v=ARM_SPEED, r=0, connect=0, block=1)
-            right_arm.rm_movej(RIGHT_HOME_JOINTS, v=ARM_SPEED, r=0, connect=0, block=1)
+            # right_arm.rm_movej(RIGHT_HOME_JOINTS, v=ARM_SPEED, r=0, connect=0, block=1)
             time.sleep(3)
         except Exception:
             pass
@@ -47,10 +48,10 @@ class Release(State):
         except Exception:
             pass
 
-        try:
-            right_arm.rm_delete_robot_arm()
-        except Exception:
-            pass
+        # try:
+        #     right_arm.rm_delete_robot_arm()
+        # except Exception:
+        #     pass
 
         try:
             pan_tilt.home()

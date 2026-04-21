@@ -21,7 +21,8 @@ from ultralytics import YOLO
 
 from common.config import (CAMERA_HEAD,CAMERA_CHEST)
 from common.skills.agv_api import agv, wait_nav
-from common.skills.arm import left_arm, right_arm
+# from common.skills.arm import left_arm, right_arm
+from common.skills.arm import left_arm
 from common.skills.audio_module.voice_assiant import (
     doorbell,
     extract_drink,
@@ -33,9 +34,6 @@ from common.skills.head_control import pan_tilt
 from common.state_machine import State
 from task1 import config
 from task1.behaviors.vision.client import analyze_person_features
-<<<<<<< HEAD
-from task1.behaviors.vision import (GazeAPI,SeatManager)
-=======
 
 # 导入语言配置
 import sys
@@ -45,7 +43,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from common.config import LANGUAGE
 
 log = logging.getLogger("task1.receive_guest")
->>>>>>> 59c9b2b (删除复件)
 
 _DEFAULT_DETECTION_CONF = 0.35
 _GUEST_CROP_WINDOW_S = 2.0
@@ -92,7 +89,8 @@ class ReceiveGuest(State):
         self._feature_jobs: dict[int, FeatureExtractionJob] = {}
         seat_coords = [seat["box1"] for seat in config.SEATS if any(seat["box1"])]
         if not hasattr(self, "seat_manager"):
-            self.seat_manager = SeatManager(seat_coords, min_empty=2)
+            # self.seat_manager = SeatManager(seat_coords, min_empty=2)
+            None
     def execute(self, ctx) -> str:
         model = self._get_model()
         self._feature_jobs = {}
@@ -115,10 +113,7 @@ class ReceiveGuest(State):
             detected = doorbell.wait_for_doorbell(timeout=60)
             doorbell.stop()
             log.info("门铃检测结果: %s", "detected" if detected else "timeout")
-<<<<<<< HEAD
-=======
             
->>>>>>> 59c9b2b (删除复件)
             # 导航到门口
             pan_tilt.home()
             agv.navigate_to(config.STATION_START, config.STATION_DOOR)
@@ -152,18 +147,11 @@ class ReceiveGuest(State):
             # 导航到空位置
             seat_id = ctx.find_free_seat()
             if seat_id is None:
-<<<<<<< HEAD
-                agv.navigate_to(agv.get_current_station(), config.STATION_OBSERVATION)
-                wait_nav(timeout=config.NAV_TIMEOUT)
-                update_seats(ctx, model, self._cam_chest, box_key="box2")
-                seat_id = ctx.find_free_seat()
-=======
                 seat_id = _find_free_seat_after_additional_observation(
                     ctx,
                     model,
                     self._cam_head,
                 )
->>>>>>> 59c9b2b (删除复件)
 
             if seat_id is not None:
                 nav_id, angle = _get_seat_navigation_target(seat_id)
@@ -188,13 +176,13 @@ class ReceiveGuest(State):
                 connect=0,
                 block=0,
             )
-            right_arm.rm_movej(
-                config.RIGHT_HOME_JOINTS,
-                v=config.ARM_SPEED,
-                r=0,
-                connect=0,
-                block=0,
-            )
+            # right_arm.rm_movej(
+            #     config.RIGHT_HOME_JOINTS,
+            #     v=config.ARM_SPEED,
+            #     r=0,
+            #     connect=0,
+            #     block=0,
+            # )
 
         for guest_index, job in self._feature_jobs.items():
             features = _collect_feature_result(job, timeout_s=_FEATURE_WAIT_TIMEOUT_S)

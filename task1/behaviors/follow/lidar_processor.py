@@ -297,6 +297,7 @@ class LidarProcessor:
             mask = labels == cid
             count = np.sum(mask)
 
+            # 过滤掉过小或过大的聚类
             if count < CLUSTER_MIN_POINTS or count > CLUSTER_MAX_POINTS:
                 continue
 
@@ -310,7 +311,8 @@ class LidarProcessor:
                 center_y=center[1],
                 radius=radius,
             )
-
+            
+            # 判断是不是腿
             if LEG_MIN_RADIUS <= radius <= LEG_MAX_RADIUS:
                 cluster.is_leg_candidate = True
 
@@ -343,6 +345,8 @@ class LidarProcessor:
             for j in range(i + 1, len(leg_candidates)):
                 if j in paired:
                     continue
+                
+                # 聚类中心的距离
                 dist = math.hypot(
                     leg_candidates[i].center_x - leg_candidates[j].center_x,
                     leg_candidates[i].center_y - leg_candidates[j].center_y,

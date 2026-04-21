@@ -12,7 +12,8 @@ import logging
 import time
 
 from common.state_machine import State
-from common.skills.arm import left_arm, right_arm, left_gripper
+# from common.skills.arm import left_arm, right_arm, left_gripper
+from common.skills.arm import left_arm,  left_gripper
 from task1 import config
 from task1.behaviors.follow import FollowRunner
 

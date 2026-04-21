@@ -1,6 +1,6 @@
 """
 =============================================================================
-config.py — 全局配置参数
+config.py — 跟随配置参数
 =============================================================================
 所有可调参数集中在此文件，方便统一管理和调优。
 """
@@ -12,7 +12,7 @@ import math
 ROBOT_RADIUS = 0.5448                # 机器人外接圆半径 (m)，用于避障安全距离计算
 ROBOT_MAX_LINEAR_VEL = 0.6         # 最大线速度 (m/s)，室内跟随建议 0.4~0.8
 ROBOT_MAX_ANGULAR_VEL = 0.8        # 最大角速度 (rad/s)
-MAX_LINEAR_ACCEL = 0.5             # 最大线加速度 (m/s²)，限制每周期速度变化
+MAX_LINEAR_ACCEL = 0.4            # 最大线加速度 (m/s²)，限制每周期速度变化
 MAX_ANGULAR_ACCEL = 1.0            # 最大角加速度 (rad/s²)
 ROBOT_WHEEL_BASE = 0.448             # 差速轮间距 (m)，用于运动学计算
 
@@ -66,13 +66,13 @@ DETECTION_INTERVAL_MS = 100            # 视觉检测间隔 (ms)，即约10fps
 # LiDAR聚类参数
 # =============================================================================
 CLUSTER_EPS = 0.06                 # DBSCAN聚类半径 (m)，人腿直径约10-15cm
-CLUSTER_MIN_POINTS = 6             # 最小聚类点数
+CLUSTER_MIN_POINTS = 10             # 最小聚类点数
 CLUSTER_MAX_POINTS = 50            # 最大聚类点数（超过的可能是墙壁等大物体）
 LEG_MIN_RADIUS = 0.08              # 人腿最小半径 (m)
 LEG_MAX_RADIUS = 0.20              # 人腿最大半径 (m)
 LEG_PAIR_MIN_DIST = 0.03           # 两腿最小间距 (m)
-LEG_PAIR_MAX_DIST = 0.50           # 两腿最大间距 (m)
-MAP_DIFF_THRESHOLD = 0.20          # 与静态地图差分的距离阈值 (m)
+LEG_PAIR_MAX_DIST = 0.35           # 两腿最大间距 (m)
+MAP_DIFF_THRESHOLD = 0.30          # 与静态地图差分的距离阈值 (m)
                                    # 小于此阈值的点认为是地图上的静态物体
 
 # =============================================================================
@@ -87,9 +87,9 @@ EKF_MAX_COAST_TIME = 3.0          # 最大无观测预测时间 (s)
 # =============================================================================
 # 跟随控制参数
 # =============================================================================
-FOLLOW_DISTANCE = 1.0              # 目标跟随距离 (m)
+FOLLOW_DISTANCE =               # 目标跟随距离 (m)
 FOLLOW_DISTANCE_TOLERANCE = 0.2    # 距离容差 (m)
-FOLLOW_ANGLE_TOLERANCE = 0.2      # 角度容差 (rad)，约10°
+FOLLOW_ANGLE_TOLERANCE = 0.3      # 角度容差 (rad)，约10°
 
 # PID 线速度控制器
 PID_LINEAR_KP = 0.8

@@ -7,7 +7,8 @@ from Robotic_Arm.rm_robot_interface import *
 from common.state_machine import State
 from common.skills.slide_control import slide_control
 from common.skills.agv_api import agv
-from common.skills.arm import left_arm, right_arm, left_gripper, right_gripper
+# from common.skills.arm import left_arm, right_arm, left_gripper, right_gripper
+from common.skills.arm import left_arm,left_gripper
 from common.skills.head_control import pan_tilt
 from common.skills.camera import camera_manager as cams
 from common.skills.audio_module import voice_assistant, doorbell, extract_name
@@ -37,10 +38,10 @@ class InitAndWait(State):
 
         # 机械臂回初始位置（需要释放）
         left_arm.rm_movej(LEFT_HOME_JOINTS, v=ARM_SPEED, r=0, connect=0, block=0)
-        right_arm.rm_movej(RIGHT_HOME_JOINTS, v=ARM_SPEED, r=0, connect=0, block=0)
+        # right_arm.rm_movej(RIGHT_HOME_JOINTS, v=ARM_SPEED, r=0, connect=0, block=0)
 
         left_gripper.open()
-        right_gripper.open()
+        # right_gripper.open()
 
         # 云台回中
         pan_tilt.home()
