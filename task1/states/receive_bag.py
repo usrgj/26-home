@@ -17,7 +17,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from common.config import LANGUAGE
 from common.state_machine import State
 from common.skills.agv_api import agv, wait_nav
-from common.skills.arm import left_arm, right_arm, left_gripper
+# from common.skills.arm import left_arm, right_arm, left_gripper
+from common.skills.arm import left_arm,  left_gripper
 from common.skills.audio_module.voice_assiant import voice_assistant
 from task1 import config
 import time

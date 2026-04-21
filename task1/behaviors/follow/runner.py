@@ -145,7 +145,10 @@ class FollowRunner:
         return self._target_locked
 
     def step(self) -> FollowStepResult:
-        """执行一个跟随控制周期。"""
+        """
+        跟随的主逻辑
+        执行一个跟随控制周期。
+        """
         if not self._running:
             raise RuntimeError("FollowRunner 尚未启动，请先调用 start()")
 
@@ -224,6 +227,7 @@ class FollowRunner:
                 # LiDAR 同时承担两件事：提供人物候选，以及提供避障扇区。
                 scans = self._robot_api.get_lidar_scans()
                 if scans:
+                    print("get lidar scans success")
                     lidar_candidates = self._lidar_proc.process(scans, robot_pose)
                     obstacle_sectors = self._lidar_proc.get_obstacle_sectors(scans)
             except NotImplementedError:
