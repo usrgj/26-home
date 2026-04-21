@@ -24,7 +24,7 @@ from common.skills.head_control import pan_tilt
 from task1 import config
 
 # 导入语言配置
-PROJECT_ROOT = Path(__file__).resolve().parents[2]  # 向上2级到 26-home
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 from common.config import LANGUAGE
 
@@ -41,7 +41,6 @@ class IntroduceGuests(State):
         first_guest = guests[0]
         second_guest = guests[1]
 
-        # 状态1结束后通常停在第二位客人的导航站点附近；若取不到则退化为第二位客人的 seat_id 对应站点。
         view_station_id = _get_intro_view_station_id(second_guest.seat_id)
 
         _face_guest(view_station_id, second_guest.seat_id)
@@ -54,7 +53,6 @@ class IntroduceGuests(State):
 
 
 def _safe_speak(text: str) -> None:
-    """尽量播报介绍语句，失败时不打断主流程。"""
     try:
         voice_assistant.speak(text)
     except Exception as exc:
@@ -62,7 +60,6 @@ def _safe_speak(text: str) -> None:
 
 
 def _get_intro_view_station_id(fallback_seat_id: str) -> str:
-    """确定介绍阶段当前所处的观察站点。"""
     current_station = agv.get_current_station() or ""
     if current_station:
         return current_station
@@ -77,18 +74,12 @@ def _get_intro_view_station_id(fallback_seat_id: str) -> str:
 
 
 def _face_guest(view_station_id: str, target_seat_id: str) -> None:
-    """通过底盘原地转向，让机器人面向目标客人。"""
     try:
         pan_tilt.home()
     except Exception as exc:
         log.warning("云台回中失败: %s", exc)
 
-    if not view_station_id:
-        log.warning("缺少介绍观察站点，跳过底盘转向")
-        return
-
-    if not target_seat_id:
-        log.warning("目标客人缺少 seat_id，跳过底盘转向")
+    if not view_station_id or not target_seat_id:
         return
 
     angle_deg = _get_guest_facing_angle_deg(view_station_id, target_seat_id)
@@ -118,16 +109,12 @@ def _face_guest(view_station_id: str, target_seat_id: str) -> None:
 
 
 def _get_guest_facing_angle_deg(view_station_id: str, target_seat_id: str) -> float | None:
-    """从介绍阶段角度配置里查询目标朝向角度（度）。"""
     station_angles = config.INTRO_LOOK_ANGLES_DEG.get(view_station_id, {})
     angle_deg = station_angles.get(target_seat_id)
-    if angle_deg is None:
-        return None
-    return float(angle_deg)
+    return float(angle_deg) if angle_deg is not None else None
 
 
 def _get_seat_nav_id(seat_id: str) -> str:
-    """从 seat_id 查其对应的导航站点。"""
     for seat_mapping in config.SEATS_MAPPING:
         if seat_mapping["seat_id"] == seat_id:
             return str(seat_mapping["nav_id"])
@@ -135,95 +122,71 @@ def _get_seat_nav_id(seat_id: str) -> str:
 
 
 def _build_intro_text(listener, subject, subject_index: int) -> str:
-    """根据全局语言配置生成介绍文案（英文或中文）。"""
+    """生成英文介绍文案"""
     listener_name = (getattr(listener, "name", "") or "").strip()
     subject_name = (getattr(subject, "name", "") or "").strip()
     favorite_drink = (getattr(subject, "favorite_drink", "") or "").strip()
     subject_features = getattr(subject, "visual_features", {}) or {}
 
-    if LANGUAGE == "en":
-        listener_label = listener_name or "this guest"
-        subject_label = subject_name or _get_guest_fallback_name_en(subject_index)
-        sentences = [f"{listener_label}, this is {subject_label}."]
-        if favorite_drink:
-            sentences.append(f"{subject_label}'s favorite drink is {favorite_drink}.")
-        feature_phrase = _build_visual_feature_phrase_en(subject_features)
-        if feature_phrase:
-            sentences.append(f"{subject_label} {feature_phrase}.")
-        return " ".join(sentences)
-    else:
-        # 中文版本
-        listener_label = listener_name or "这位客人"
-        subject_label = subject_name or _get_guest_fallback_name_zh(subject_index)
-        sentences = [f"{listener_label}，这位是{subject_label}。"]
-        if favorite_drink:
-            # 假设 favorite_drink 是英文，可以保留或简单处理
-            sentences.append(f"{subject_label}最喜欢的饮料是{favorite_drink}。")
-        feature_phrase = _build_visual_feature_phrase_zh(subject_features)
-        if feature_phrase:
-            sentences.append(f"{subject_label}{feature_phrase}。")
-        return "".join(sentences)
+    # 英文始终使用英文回退名称
+    fallback_names = ["the first guest", "the second guest"]
+    subject_label = subject_name or fallback_names[subject_index]
+    listener_label = listener_name or "this guest"
 
-
-def _get_guest_fallback_name_en(subject_index: int) -> str:
-    return "the first guest" if subject_index == 0 else "the second guest"
-
-
-def _get_guest_fallback_name_zh(subject_index: int) -> str:
-    return "第一位客人" if subject_index == 0 else "第二位客人"
+    sentences = [f"{listener_label}, this is {subject_label}."]
+    if favorite_drink:
+        sentences.append(f"{subject_label}'s favorite drink is {favorite_drink}.")
+    feature_phrase = _build_visual_feature_phrase_en(subject_features)
+    if feature_phrase:
+        sentences.append(f"{subject_label} {feature_phrase}.")
+    return " ".join(sentences)
 
 
 def _build_visual_feature_phrase_en(features: dict) -> str:
-    """英文视觉特征描述。"""
+    """英文视觉特征描述，返回以动词开头的短语（不含主语）"""
     if not features:
         return ""
+
     parts = []
-    gender = str(features.get("gender", "")).strip()
+    # 性别
+    gender = features.get("gender", "")
     if gender:
-        gender_en = "male" if "man" in gender else "female" if "female" in gender else gender
-        parts.append(gender_en)
-    hair_color = str(features.get("hair color", "")).strip()
+        gender_word = "a man" if "male" in str(gender).lower() else "a woman" if "female" in str(gender).lower() else ""
+        if gender_word:
+            parts.append(f"is {gender_word}")
+    # 头发颜色
+    hair_color = features.get("hair_color") or features.get("hair color")
     if hair_color:
         parts.append(f"has {hair_color} hair")
-    clothes_color = str(features.get("clothes color", "")).strip()
-    if clothes_color:
-        parts.append(f"wears {clothes_color} clothes")
-    glasses = str(features.get("glasses", "")).strip()
-    if glasses and "wears" in glasses.lower():
+    # 衣服颜色
+    clothing_color = features.get("clothing_color") or features.get("clothes color")
+    if clothing_color:
+        parts.append(f"is wearing {clothing_color} clothes")
+    # 眼镜
+    glasses = features.get("glasses")
+    if glasses and str(glasses).lower() not in ["none", "no", "false", ""]:
         parts.append("wears glasses")
-    hat = str(features.get("hat", "")).strip()
-    if hat and "wear" in hat.lower() and "not" not in hat.lower():
+    # 帽子
+    hat = features.get("hat")
+    if hat and str(hat).lower() not in ["none", "no", "false", ""]:
         parts.append("wears a hat")
+
     if not parts:
         return ""
-    return "who is " + ", ".join(parts)
 
-
-def _build_visual_feature_phrase_zh(features: dict) -> str:
-    """中文视觉特征描述（简单映射）。"""
-    if not features:
-        return ""
-    parts = []
-    gender = str(features.get("gender", "")).strip()
-    if gender:
-        if "male" in gender.lower():
-            parts.append("男性")
-        elif "female" in gender.lower():
-            parts.append("女性")
+    # 将第一个部分作为主谓结构，后续用逗号连接
+    if parts[0].startswith("is "):
+        # 比如 "is a man" 后面接 "wears glasses" 需要调整
+        # 更自然的做法：全部用第三人称单数动词
+        # 简单处理：将第一个部分保留，其余部分加上 "and" 或逗号
+        if len(parts) == 1:
+            return parts[0]
         else:
-            parts.append(gender)
-    hair_color = str(features.get("hair color", "")).strip()
-    if hair_color:
-        parts.append(f"{hair_color}头发")
-    clothes_color = str(features.get("clothes color", "")).strip()
-    if clothes_color:
-        parts.append(f"穿着{clothes_color}衣服")
-    glasses = str(features.get("glasses", "")).strip()
-    if glasses and "wears" in glasses.lower():
-        parts.append("戴眼镜")
-    hat = str(features.get("hat", "")).strip()
-    if hat and "wear" in hat.lower() and "not" not in hat.lower():
-        parts.append("戴帽子")
-    if not parts:
-        return ""
-    return "，".join(parts)
+            # 将第一个部分（如 "is a man"）替换为 "is a man who" 然后连接
+            rest = ", ".join(parts[1:])
+            return parts[0] + " who " + rest
+    else:
+        # 如果没有 is 开头，直接用逗号连接
+        return ", ".join(parts)
+
+# 注意：本文件已移除所有中文分支，仅保留英文。若需要中文请恢复相应函数。

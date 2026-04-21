@@ -28,8 +28,7 @@ TTS_URL = "http://127.0.0.1:8002/v1/audio/speech"
 # ═══════════════════════════════════════════════════════════════════════════
 #  TTS 服务
 # ═══════════════════════════════════════════════════════════════════════════
-TTS_VOICE = "zh-CN-XiaoxiaoNeural"
-TTS_CACHE_DIR = "../audio_cache"
+TTS_VOICE = "en-US-JennyNeural"   # 改为英文语音
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  录音与识别
@@ -40,8 +39,8 @@ AUDIO_FRAME_MS = 30
 AUDIO_MAX_RECORD_S = 10
 AUDIO_SILENCE_MS = 1500
 
-# 全局语言设置，影响 ASR 热词和 TTS 语言。赛前根据需要改成 "zh" 或 "en"。
-LANGUAGE = "zh"
+# 全局语言设置，改为英文
+LANGUAGE = "en"
 
 # 英文饮料列表，用于 ASR 热词和模糊匹配。
 COMMON_DRINKS = [
@@ -73,4 +72,3 @@ COMMON_DRINKS = [
     "lemonade",
     "soda",
 ]
-

@@ -322,7 +322,7 @@ class VoiceAssistant:
         if os.path.exists(cache_path):
             return
         try:
-            payload = {"model": "tts-1", "input": text, "voice": "alloy", "speed": 1.0}
+            payload = {"model": "tts-1", "input": text, "speed": 1.0}
             resp = requests.post(TTS_URL, json=payload, timeout=10)
             if resp.status_code == 200:
                 with open(cache_path, 'wb') as f:
@@ -396,7 +396,7 @@ class VoiceAssistant:
                 os.remove(cache_path)
 
         try:
-            resp = requests.post(TTS_URL, json={"model": "tts-1", "input": text, "voice": "alloy", "speed": 1.0}, timeout=5)
+            resp = requests.post(TTS_URL, json={"model": "tts-1", "input": text, "speed": 1.0}, timeout=5)
             if resp.status_code == 200:
                 with open(cache_path, 'wb') as f:
                     f.write(resp.content)
@@ -460,7 +460,7 @@ class VoiceAssistant:
         frame_size = CHUNK * 2
         frames = [audio_int16[i:i+frame_size].tobytes() for i in range(0, len(audio_int16), frame_size) if len(audio_int16[i:i+frame_size]) == frame_size]
 
-        temp_dir = "temp_audio"
+        temp_dir = os.path.join(TTS_CACHE_DIR, "asr_temp")   # 或直接 temp_dir = TTS_CACHE_DIR
         os.makedirs(temp_dir, exist_ok=True)
         timestamp = int(time.time() * 1000)
         temp_path = os.path.join(temp_dir, f"temp_{timestamp}.wav")
