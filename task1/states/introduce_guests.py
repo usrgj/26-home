@@ -121,12 +121,13 @@ def _build_intro_text(listener, subject, subject_index: int) -> str:
     )
 
     if is_en:
-        # TODO
+        # 英文介绍
         text = f"{listener_label}, that is {subject_label}."
         if favorite_drink:
             text += f" {subject_label}'s favorite drink is {favorite_drink}."
         if feature_phrase:
-            text += f" {subject_label} {feature_phrase}."
+            # feature_phrase 已包含主语（如 "He is wearing a hat and glasses"）
+            text += f" {feature_phrase}"
         return text
     
     else:
@@ -141,7 +142,7 @@ def _build_intro_text(listener, subject, subject_index: int) -> str:
 
 def build_visual_feature_phrase(features: dict) -> str:
     '''
-    构建视觉描述文本
+    构建视觉描述文本（英文）
     '''
     result = ""
     # 不定特征
@@ -156,8 +157,36 @@ def build_visual_feature_phrase(features: dict) -> str:
     glasses = features.get("glasses")
     
     if LANGUAGE == "en":
-        #TODO
-        None
+        # 英文描述，例如 "He is wearing a hat and glasses, with black hair and a red shirt."
+        # 注意：为了自然，我们构建一个以主语开头的句子（主语由调用方补充）
+        # 这里返回的短语应该可以直接接在主语后面，例如 " is wearing a hat..."
+        # 但调用方会写成 "{subject_label} {feature_phrase}"，所以 feature_phrase 应以动词或形容词开头
+        # 简单起见，返回一个完整的小句（不带主语），由调用方拼接
+        parts = []
+        if hat and glasses:
+            parts.append("wearing a hat and glasses")
+        elif hat:
+            parts.append("wearing a hat")
+        elif glasses:
+            parts.append("wearing glasses")
+        
+        if hair_color:
+            parts.append(f"has {hair_color} hair")
+        if clothing_color:
+            parts.append(f"is wearing {clothing_color} clothes")
+        if gender:
+            # gender 可能是 "male" 或 "female"，可转换为 "a man" / "a woman"
+            gender_word = "a man" if gender.lower() == "male" else "a woman" if gender.lower() == "female" else gender
+            parts.insert(0, f"is {gender_word}")
+        
+        if parts:
+            # 组合成 "is a man, wearing a hat and glasses, has black hair"
+            # 但更好的语法：第一个部分如果是 "is a man" 则不加逗号，后续用逗号
+            result = ", ".join(parts)
+            # 确保句子开头大写（调用方会处理）
+        else:
+            result = ""
+        return result
     else:
         result += "那边那位"
             
@@ -172,7 +201,7 @@ def build_visual_feature_phrase(features: dict) -> str:
             result += "没戴眼镜，"
             
         if hair_color:
-            result += "%s头发," % hair_color
+            result += "%s头发，" % hair_color
             
         if clothing_color:
             result += "穿着%s衣服的" % clothing_color
@@ -181,3 +210,4 @@ def build_visual_feature_phrase(features: dict) -> str:
             result += gender
             
         result += "客人，"
+        return result
