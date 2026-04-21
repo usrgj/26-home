@@ -26,7 +26,7 @@ else:
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUDIO_DIR = os.path.join(BASE_DIR, "audio_cache")
-CACHE_DIR = AUDIO_DIR   # 直接使用 AUDIO_DIR，不再使用子目录
+CACHE_DIR = AUDIO_DIR   # 统一使用 audio_cache 目录
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
 def speed_to_rate(speed):
@@ -54,7 +54,7 @@ async def speech(
     except Exception as e:
         return Response(content=f"TTS failed: {e}", status_code=500)
     
-    # 复制到缓存
+    # 复制到缓存（现在 cache_path 也在同一个 audio_cache 目录）
     shutil.copy2(audio_path, cache_path)
     # 可选：清理旧文件（保留最近200个）
     files = glob.glob(os.path.join(AUDIO_DIR, "*.mp3"))
@@ -62,11 +62,8 @@ async def speech(
         files.sort(key=os.path.getmtime)
         for f in files[:-200]:
             os.remove(f)
-    files = glob.glob(os.path.join(CACHE_DIR, "*.mp3"))
-    if len(files) > 200:
-        files.sort(key=os.path.getmtime)
-        for f in files[:-200]:
-            os.remove(f)
+    # 注意：CACHE_DIR 和 AUDIO_DIR 相同，不需要重复清理，否则会重复删除
+    # 但为了避免重复，可以只清理一次；上面的清理已经包含所有 mp3 文件
     
     return Response(content=open(audio_path, "rb").read(), media_type="audio/mpeg")
 
