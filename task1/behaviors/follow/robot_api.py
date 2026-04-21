@@ -128,10 +128,22 @@ class RobotAPI:
         return False
 
     def get_state(self):
-        try:
-            self._state = self._agv.poll_push().response["data"]
-        except:
-            pass
+        """拉取一帧新的 AGV 推送，失败时显式报错。"""
+        result = self._agv.poll_push()
+        if result is None or not getattr(result, "ok", True):
+            raise RuntimeError("未收到新的 AGV 推送")
+
+        response = getattr(result, "response", None) or {}
+        data = response.get("data")
+        if not data:
+            raise RuntimeError("AGV 推送数据为空")
+
+        self._state = data
+        return True
+
+    def has_valid_pose(self) -> bool:
+        """当前缓存推送中是否包含可用于闭环控制的位姿。"""
+        return self._state.get("x") is not None and self._state.get("y") is not None
 
     def get_robot_pose(self) -> RobotPose:
         """

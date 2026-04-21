@@ -101,8 +101,18 @@ class FollowRunner:
         if hasattr(self._fusion, "reset"):
             self._fusion.reset()
 
-        # ----- 新增：等待有效位姿（最多1秒）-----
+        # 等待首帧有效位姿（最多1秒），避免用默认原点锁目标。
         for _ in range(10):
+            try:
+                self._robot_api.get_state()
+            except Exception:
+                time.sleep(0.1)
+                continue
+
+            if hasattr(self._robot_api, "has_valid_pose") and not self._robot_api.has_valid_pose():
+                time.sleep(0.1)
+                continue
+
             pose = self._robot_api.get_robot_pose()
             if pose.x is not None and pose.y is not None:
                 self._last_robot_pose = pose
@@ -157,6 +167,17 @@ class FollowRunner:
                     lidar_count,
                 )
 
+            if hasattr(self._robot_api, "has_valid_pose") and not self._robot_api.has_valid_pose():
+                logger.warning("推送中缺少有效位姿，跳过本周期")
+                return self._finalize_step(
+                    loop_start,
+                    robot_pose,
+                    target_state,
+                    current_state,
+                    vision_count,
+                    lidar_count,
+                )
+
             try:
                 robot_pose = self._robot_api.get_robot_pose()
             except NotImplementedError:
@@ -171,6 +192,17 @@ class FollowRunner:
                 )
             except Exception as exc:
                 logger.warning("读取机器人位姿异常: %s", exc)
+                return self._finalize_step(
+                    loop_start,
+                    robot_pose,
+                    target_state,
+                    current_state,
+                    vision_count,
+                    lidar_count,
+                )
+
+            if robot_pose.x is None or robot_pose.y is None or robot_pose.theta is None:
+                logger.warning("机器人位姿无效，跳过本周期")
                 return self._finalize_step(
                     loop_start,
                     robot_pose,
@@ -198,18 +230,9 @@ class FollowRunner:
             vision_detections = []
             target_detection = None
 
-            # ----- 修改：获取 EKF 预测位置，传给视觉检测器用于空间约束匹配 -----
-            predicted_pos = None
-            if self._fusion._initialized:
-                temp_state = self._fusion.get_target_state()
-                if temp_state.is_valid:
-                    predicted_pos = (temp_state.predicted_x, temp_state.predicted_y)
-
             if self._loop_count % self._vision_interval == 0:
                 try:
-                    vision_detections = self._vision_det.detect(
-                        self._robot_api, robot_pose, predicted_pos
-                    )
+                    vision_detections = self._vision_det.detect(self._robot_api, robot_pose)
                     for det in vision_detections:
                         if det.is_target:
                             target_detection = det
@@ -249,12 +272,11 @@ class FollowRunner:
 
             target_state = self._fusion.get_target_state()
 
-            # ----- 新增：将速度方差附加到 target_state 对象上，供 motion_controller 使用 -----
-            # sensor_fusion 中需要暴露速度协方差矩阵的对应元素，这里假设已添加属性 speed_variance
+            # 保留速度方差字段用于日志和兼容性，不参与跟随控制决策。
             if hasattr(self._fusion, 'get_speed_variance'):
                 target_state.speed_variance = self._fusion.get_speed_variance()
             else:
-                target_state.speed_variance = 1.0  # 默认高方差，不信任前馈
+                target_state.speed_variance = 1.0
 
             cmd_linear = 0.0
             cmd_angular = 0.0

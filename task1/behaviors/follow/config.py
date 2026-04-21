@@ -1,6 +1,6 @@
 """
 =============================================================================
-config.py — 全局配置参数（改进版：调优避障/卡住检测/传感器噪声）
+config.py — 全局配置参数
 =============================================================================
 所有可调参数集中在此文件，方便统一管理和调优。
 """
@@ -37,7 +37,7 @@ LIDAR_MIN_RANGE = 0.001            # 最小探测距离 (m)
 # =============================================================================
 # 预处理地图文件路径
 # =============================================================================
-MAP_POINTS_NPY_PATH = "./maps/map_points.npy"
+MAP_POINTS_NPY_PATH = "/home/blinx/26-home/task1/behaviors/follow/maps/map_points.npy"
 
 # =============================================================================
 # 深度相机配置
@@ -67,41 +67,42 @@ DETECTION_INTERVAL_MS = 100            # 视觉检测间隔 (ms)，即约10fps
 # =============================================================================
 CLUSTER_EPS = 0.06                 # DBSCAN聚类半径 (m)，人腿直径约10-15cm
 CLUSTER_MIN_POINTS = 6             # 最小聚类点数
-CLUSTER_MAX_POINTS = 50            # 最大聚类点数
+CLUSTER_MAX_POINTS = 50            # 最大聚类点数（超过的可能是墙壁等大物体）
 LEG_MIN_RADIUS = 0.08              # 人腿最小半径 (m)
 LEG_MAX_RADIUS = 0.20              # 人腿最大半径 (m)
 LEG_PAIR_MIN_DIST = 0.03           # 两腿最小间距 (m)
 LEG_PAIR_MAX_DIST = 0.50           # 两腿最大间距 (m)
 MAP_DIFF_THRESHOLD = 0.20          # 与静态地图差分的距离阈值 (m)
+                                   # 小于此阈值的点认为是地图上的静态物体
 
 # =============================================================================
-# 卡尔曼滤波 (EKF) 参数（改进）
+# 卡尔曼滤波 (EKF) 参数
 # =============================================================================
-EKF_PROCESS_NOISE_POS = 0.3       # 位置过程噪声 (m²/s⁴)，降低使位置估计更平滑
-EKF_PROCESS_NOISE_VEL = 0.5       # 速度过程噪声 (m²/s⁴)，降低使速度估计更稳定
-EKF_MEASUREMENT_NOISE_LIDAR = 0.05    # LiDAR观测噪声 (m²)，LiDAR精度高
-EKF_MEASUREMENT_NOISE_VISION = 0.25   # 视觉观测噪声 (m²)，增大以反映视觉跳动
+EKF_PROCESS_NOISE_POS = 0.5       # 位置过程噪声 (m²/s⁴)
+EKF_PROCESS_NOISE_VEL = 2.0       # 速度过程噪声 (m²/s⁴)
+EKF_MEASUREMENT_NOISE_LIDAR = 0.05    # LiDAR观测噪声 (m²)
+EKF_MEASUREMENT_NOISE_VISION = 0.15   # 视觉观测噪声 (m²)
 EKF_MAX_COAST_TIME = 3.0          # 最大无观测预测时间 (s)
 
 # =============================================================================
 # 跟随控制参数
 # =============================================================================
 FOLLOW_DISTANCE = 1.0              # 目标跟随距离 (m)
-FOLLOW_DISTANCE_TOLERANCE = 0.3    # 距离容差 (m)
-FOLLOW_ANGLE_TOLERANCE = 0.2      # 角度容差 (rad)，约11.5°
+FOLLOW_DISTANCE_TOLERANCE = 0.2    # 距离容差 (m)
+FOLLOW_ANGLE_TOLERANCE = 0.2      # 角度容差 (rad)，约10°
 
-# PID 线速度控制器（稍微调低增益减少震荡）
-PID_LINEAR_KP = 0.4
+# PID 线速度控制器
+PID_LINEAR_KP = 0.8
 PID_LINEAR_KI = 0.0
 PID_LINEAR_KD = 0.1
 
-# PID 角速度控制器（增大Kp以更快纠正方向，但保留死区）
-PID_ANGULAR_KP = 1.8
+# PID 角速度控制器
+PID_ANGULAR_KP = 1.5
 PID_ANGULAR_KI = 0.0
-PID_ANGULAR_KD = 0.15
+PID_ANGULAR_KD = 0.2
 
 # =============================================================================
-# 避障参数（改进）
+# 避障参数
 # =============================================================================
 OBSTACLE_DANGER_DIST = 0.15        # 紧急停止距离 (m)
 OBSTACLE_SLOW_DIST = 0.4           # 减速距离 (m)
@@ -109,26 +110,17 @@ OBSTACLE_AVOID_DIST = 0.8          # 触发避障的距离 (m)
 VFH_SECTOR_ANGLE = 5.0             # VFH扇区角度 (deg)
 VFH_THRESHOLD = 0.5                # VFH障碍密度阈值
 
-# ----- 新增：脱困动作参数 -----
-ESCAPE_BACKWARD_SPEED = -0.15      # 脱困时后退速度 (m/s)
-ESCAPE_ROTATION_SPEED = 0.5        # 脱困时旋转速度 (rad/s)
-ESCAPE_BACKWARD_TIME = 1.0         # 脱困后退持续时间 (s)
-ESCAPE_ROTATION_TIMEOUT = 3.0      # 脱困旋转最大持续时间 (s)
-
 # =============================================================================
-# 状态机参数（改进）
+# 状态机参数
 # =============================================================================
 TARGET_LOST_TIMEOUT = 2.0          # 视觉连续丢失多久后切导航模式 (s)
 TARGET_RECOVER_TIMEOUT = 0.5       # 重新看到目标多久后切回直接控制 (s)
 STUCK_TIMEOUT = 2.0                # 直接跟随中被避障卡住多久后切导航 (s)
-STUCK_SPEED_THRESHOLD = 0.08       # 判定"卡住"的速度阈值 (m/s)  # 略放宽
-STUCK_MIN_TARGET_DIST = 1.2        # 目标距离大于此值才算"卡住"(m) # 降低阈值，更灵敏
+STUCK_SPEED_THRESHOLD = 0.05       # 判定"卡住"的速度阈值 (m/s)
+STUCK_MIN_TARGET_DIST = 1.5        # 目标距离大于此值才算"卡住"(m)，近距离停下是正常的
 NAV_GOAL_REACHED_DIST = 0.5        # 导航到达判定距离 (m)
 SEARCH_ROTATION_SPEED = 0.5        # 搜索模式下的旋转速度 (rad/s)
 SEARCH_TIMEOUT = 10.0              # 搜索模式超时 (s)
-
-# ----- 新增：卡住检测实际移动阈值 -----
-STUCK_MIN_ACTUAL_MOVE = 0.05       # 判定为"没有移动"的实际位移阈值 (m)
 
 # =============================================================================
 # 系统参数

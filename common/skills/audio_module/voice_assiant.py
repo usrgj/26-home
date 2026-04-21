@@ -396,7 +396,7 @@ class VoiceAssistant:
                 os.remove(cache_path)
 
         try:
-            resp = requests.post(TTS_URL, json={"input": text, "speed": 1.0}, timeout=5)
+            resp = requests.post(TTS_URL, json={"model": "tts-1", "input": text, "voice": "alloy", "speed": 1.0}, timeout=5)
             if resp.status_code == 200:
                 with open(cache_path, 'wb') as f:
                     f.write(resp.content)
