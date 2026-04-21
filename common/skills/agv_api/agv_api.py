@@ -160,7 +160,7 @@ class AGVApi:
 
     def free_navigate_to(self, x: float, y: float, theta: float) -> bool:
         """
-        自由导航到目标点
+        自由导航到目标点（全局路劲规划）
 
         角度是弧度制
 
@@ -211,6 +211,18 @@ class AGVApi:
         :param mode:  0=里程模式, 1=定位模式
         """
         self._send(_NAV, "0BF0", {"angle": angle, "vw": vw, "mode": mode})
+        
+    
+    def move_circle(self, radius: float, degree: float, vw: float = 0.5, mode: int = 0):
+        """
+        圆弧运动：以固定角速度沿圆弧运动固定角度
+
+        :param radius: 旋转半径, 单位m; 圆心在机器人坐标系左边为正, 右边为负
+        :param degree:  旋转角度, 单位度
+        :param vw:     旋转速度, 单位为 rad/s, 如果是负数, 则说明是顺时针走
+        :param mode:   0=里程模式, 1=定位模式
+        """
+        self._send(_NAV, "0BF2", {"radius": radius, "angle": degree, "vw": vw, "mode": mode})
 
     def pause_navigation(self):
         """暂停当前导航"""

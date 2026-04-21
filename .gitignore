@@ -15,3 +15,4 @@ pids/
 *.mp3
 models/
 cache/
+log.txt

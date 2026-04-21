@@ -43,6 +43,7 @@ class PIDController:
         self._first = True
 
     def compute(self, error: float, current_time: float) -> float:
+        """基于当前误差计算一次控制输出。"""
         if self._first:
             self._prev_error = error
             self._prev_time = current_time
@@ -68,12 +69,14 @@ class PIDController:
         return np.clip(output, self.output_min, self.output_max)
 
     def reset(self):
+        """清空积分项和历史状态，避免模式切换后残留控制量。"""
         self._integral = 0.0
         self._prev_error = 0.0
         self._first = True
 
 
 class MotionController:
+    """将目标状态和避障信息转换成底盘速度指令。"""
     def __init__(self, robot_api: RobotAPI):
         self._robot_api = robot_api
         self._linear_pid = PIDController(
@@ -91,6 +94,12 @@ class MotionController:
 
     def compute_velocity(self, target: TargetState, robot_pose: RobotPose,
                          obstacle_sectors: np.ndarray) -> Tuple[float, float]:
+        """
+        计算直接跟随模式下的线速度和角速度。
+
+        流程是：先根据目标位置/预测位置生成期望方向，再用 VFH 调整成
+        安全方向，最后叠加 PID、限速和加速度限幅。
+        """
         now = time.time()
         dx = target.x - robot_pose.x
         dy = target.y - robot_pose.y
@@ -99,6 +108,7 @@ class MotionController:
         angle_error = self._normalize_angle(angle_to_target_world - robot_pose.theta)
 
         if target.speed > 0.1:
+            # 目标在移动时优先追预测点，减少拐弯和滞后。
             pred_dx = target.predicted_x - robot_pose.x
             pred_dy = target.predicted_y - robot_pose.y
             desired_angle_world = math.atan2(pred_dy, pred_dx)
@@ -157,10 +167,12 @@ class MotionController:
         return linear_vel, angular_vel
 
     def rotate_search(self, direction: float = 1.0) -> Tuple[float, float]:
+        """搜索模式下原地匀速旋转，不前进。"""
         from .config import SEARCH_ROTATION_SPEED
         return 0.0, direction * SEARCH_ROTATION_SPEED
 
     def stop(self):
+        """停止底盘并清空内部 PID 状态。"""
         self._robot_api.stop()
         self._linear_pid.reset()
         self._angular_pid.reset()
@@ -170,6 +182,7 @@ class MotionController:
     # ========== VFH 避障 ==========
     def _vfh_find_safe_direction(self, desired_angle: float,
                                   obstacle_sectors: np.ndarray) -> float:
+        """从所有开放扇区里选择最接近期望方向的安全角度。"""
         num_sectors = len(obstacle_sectors)
         densities = np.maximum(0, 1.0 - obstacle_sectors / OBSTACLE_AVOID_DIST)
         open_sectors = densities < VFH_THRESHOLD
@@ -193,6 +206,11 @@ class MotionController:
 
     def _check_obstacles(self, heading_angle: float,
                           obstacle_sectors: np.ndarray) -> Tuple[bool, float]:
+        """
+        检查当前航向附近的净空。
+
+        返回 `(是否急停, 速度缩放因子)`，供上层统一做减速或停车。
+        """
         num_sectors = len(obstacle_sectors)
         center_sector = self._angle_to_sector(heading_angle, num_sectors)
         check_range = int(30.0 / (360.0 / num_sectors))
@@ -212,6 +230,7 @@ class MotionController:
 
     @staticmethod
     def _normalize_angle(angle: float) -> float:
+        """将角度归一化到 [-pi, pi] 区间。"""
         while angle > math.pi:
             angle -= 2 * math.pi
         while angle < -math.pi:
@@ -220,12 +239,14 @@ class MotionController:
 
     @staticmethod
     def _angle_to_sector(angle_rad: float, num_sectors: int) -> int:
+        """将弧度角映射到 VFH 扇区编号。"""
         angle_deg = math.degrees(angle_rad) % 360
         sector_size = 360.0 / num_sectors
         return int(angle_deg / sector_size) % num_sectors
 
     @staticmethod
     def _sector_to_angle(sector: int, num_sectors: int) -> float:
+        """将扇区中心编号反算为弧度角。"""
         sector_size = 360.0 / num_sectors
         angle_deg = sector * sector_size + sector_size / 2.0
         if angle_deg > 180:

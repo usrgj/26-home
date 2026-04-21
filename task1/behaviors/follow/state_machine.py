@@ -21,6 +21,7 @@ logger = logging.getLogger("StateMachine")
 
 
 class FollowState(Enum):
+    """跟随子系统的高层行为模式。"""
     IDLE = auto()
     DIRECT_FOLLOW = auto()
     NAV_FOLLOW = auto()
@@ -29,6 +30,7 @@ class FollowState(Enum):
 
 
 class StateMachine:
+    """管理直接跟随、导航接续和搜索之间的切换。"""
     def __init__(self, robot_api: RobotAPI):
         self._robot_api = robot_api
         self._state = FollowState.IDLE
@@ -46,9 +48,11 @@ class StateMachine:
     
     @property
     def state(self) -> FollowState:
+        """返回当前高层状态。"""
         return self._state
     
     def start(self):
+        """重置内部计时器并进入直接跟随模式。"""
         self._vision_lost_since = 0.0
         self._vision_recover_since = 0.0
         self._target_visible = False
@@ -63,6 +67,7 @@ class StateMachine:
         logger.info("跟随开始 → DIRECT_FOLLOW")
     
     def stop(self):
+        """停止底盘与导航，并回到空闲状态。"""
         self._robot_api.stop()
         try:
             self._robot_api.cancel_navigation()
@@ -73,6 +78,11 @@ class StateMachine:
     
     def update(self, target: TargetState, robot_pose: RobotPose,
                cmd_linear_vel: float = None) -> FollowState:
+        """
+        根据当前目标状态和控制输出更新高层模式。
+
+        这里不直接下发速度，只负责判断“继续直跟 / 切导航 / 原地搜索”。
+        """
         now = time.time()
         target_visible_now = target.is_valid and not target.is_coasting
 
@@ -100,6 +110,7 @@ class StateMachine:
     
     def _update_direct_follow(self, target: TargetState, robot_pose: RobotPose,
                                now: float, cmd_linear_vel: float = None):
+        """处理直接跟随模式下的丢失检测和卡住检测。"""
         if not self._target_visible:
             self._is_stuck = False
             lost_duration = now - self._vision_lost_since
@@ -142,6 +153,7 @@ class StateMachine:
         logger.info(f"{reason} → NAV_FOLLOW 目标: ({self._nav_goal_x:.2f}, {self._nav_goal_y:.2f})")
     
     def _update_nav_follow(self, target: TargetState, robot_pose: RobotPose, now: float):
+        """处理导航接续模式：发导航、监控恢复、决定是否转搜索。"""
         # 目标重新可见足够时间 → 切回直接跟随
         if self._target_visible:
             recover_duration = now - self._vision_recover_since
@@ -192,6 +204,7 @@ class StateMachine:
             pass
     
     def _update_search(self, target: TargetState, robot_pose: RobotPose, now: float):
+        """处理原地搜索模式，找到目标就回直跟，超时则宣告丢失。"""
         if self._target_visible:
             self._transition_to(FollowState.DIRECT_FOLLOW)
             logger.info("搜索找到目标 → DIRECT_FOLLOW")
@@ -203,6 +216,7 @@ class StateMachine:
             logger.warning(f"搜索超时 {SEARCH_TIMEOUT}s → LOST")
     
     def _transition_to(self, new_state: FollowState):
+        """执行状态切换并重置该状态对应的辅助变量。"""
         self._state = new_state
         self._state_enter_time = time.time()
         if new_state == FollowState.NAV_FOLLOW:
@@ -211,8 +225,10 @@ class StateMachine:
             self._search_direction = 1.0
     
     def get_search_direction(self) -> float:
+        """返回搜索模式下的旋转方向。"""
         return self._search_direction
     
     def get_status_str(self) -> str:
+        """生成适合日志输出的状态摘要。"""
         elapsed = time.time() - self._state_enter_time
         return f"[{self._state.name}] {elapsed:.1f}s | 目标{'可见' if self._target_visible else '不可见'}"

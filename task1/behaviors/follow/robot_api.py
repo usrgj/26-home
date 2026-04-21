@@ -1,5 +1,5 @@
 """
-robot_api.py — 机器人硬件抽象层（修复版：位姿获取健壮性增强）
+robot_api.py — 机器人硬件抽象层
 """
 import math
 import time
@@ -91,6 +91,7 @@ state_map = {
 
 
 class RobotAPI:
+    """封装跟随子系统需要的底盘、LiDAR、相机和导航接口。"""
     def __init__(self):
         from common.skills.agv_api import agv
         from common.skills.camera import camera_manager
@@ -109,6 +110,7 @@ class RobotAPI:
         print("自动跟随初始化")
 
     def wait_for_data(self, timeout: float = 6.0) -> bool:
+        """配置 AGV 推送字段，并等待第一帧有效推送到达。"""
         result = self._agv.configure_push(interval=50, fields=[
             "x", "y", "angle", "task_status",
             "vx", "w", "create_on", "block_x", "block_y",
@@ -186,6 +188,7 @@ class RobotAPI:
         return pose
 
     def get_lidar_scans(self) -> List[LidarScan]:
+        """读取底盘返回的全部 LiDAR 原始扫描，并整理成统一数据结构。"""
         raw_data = self._agv.get_lidar()
         if raw_data is None:
             return []
@@ -219,6 +222,7 @@ class RobotAPI:
         return scans
 
     def get_camera_frame(self, camera_name: str) -> CameraFrame:
+        """按名称获取一帧彩色图、深度图和相机内参。"""
         camera_map = {
             "head": self.camera_head,
             "chest": self.camera_chest,
@@ -244,11 +248,13 @@ class RobotAPI:
         )
 
     def send_velocity(self, linear_vel: float, angular_vel: float):
+        """下发差速底盘速度，并在接口层做一次限幅保护。"""
         vx = max(-ROBOT_MAX_LINEAR_VEL, min(ROBOT_MAX_LINEAR_VEL, linear_vel))
         w = max(-ROBOT_MAX_ANGULAR_VEL, min(ROBOT_MAX_ANGULAR_VEL, angular_vel))
         self._agv.send_velocity(vx=vx, w=w)
 
     def send_arc_motion(self, linear_vel: float, radius: float):
+        """用圆弧半径换算角速度，再复用通用速度接口。"""
         if abs(radius) < 0.01:
             angular_vel = 0.0
         else:
@@ -256,26 +262,32 @@ class RobotAPI:
         self.send_velocity(linear_vel, angular_vel)
 
     def stop(self):
+        """立即停止底盘。"""
         self.send_velocity(0.0, 0.0)
 
     def navigate_to(self, x: float, y: float, theta: float) -> bool:
+        """调用底盘自由导航，到达世界坐标系下的目标位姿。"""
         try:
             return self._agv.free_navigate_to(x, y, theta)
         except:
             return False
 
     def get_navigation_status(self) -> NavigationResult:
+        """将底盘任务状态码转换为跟随模块可直接消费的导航状态。"""
         task_code = self._state.get("task_status")
         success = (task_code == 4)
         return NavigationResult(success=success, status=state_map.get(task_code, "UNKNOWN"))
 
     def cancel_navigation(self):
+        """取消当前导航任务。"""
         self._agv.cancel_navigation()
 
     def get_global_map(self) -> Optional[Dict]:
+        """预留接口：如需在线取图，可在此接入地图服务。"""
         raise NotImplementedError("请实现 get_global_map()")
 
     def robot_to_world(self, local_x: float, local_y: float, pose: RobotPose) -> Tuple[float, float]:
+        """将机器人坐标系中的点转换到世界坐标系。"""
         cos_t = math.cos(pose.theta)
         sin_t = math.sin(pose.theta)
         world_x = pose.x + local_x * cos_t - local_y * sin_t
@@ -283,6 +295,7 @@ class RobotAPI:
         return world_x, world_y
 
     def world_to_robot(self, world_x: float, world_y: float, pose: RobotPose) -> Tuple[float, float]:
+        """将世界坐标系中的点转换到机器人坐标系。"""
         dx = world_x - pose.x
         dy = world_y - pose.y
         cos_t = math.cos(pose.theta)
@@ -292,4 +305,5 @@ class RobotAPI:
         return local_x, local_y
 
     def release(self):
+        """恢复较轻量的 AGV 推送配置，供独立脚本退出时清理使用。"""
         self._agv.configure_push(interval=9990, fields=["create_on"])

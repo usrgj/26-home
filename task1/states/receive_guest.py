@@ -98,48 +98,6 @@ class ReceiveGuest(State):
         self._feature_jobs = {}
         voice_assistant.set_recording(1)
 
-<<<<<<< HEAD
-    # 初始化座位管理器（建议在__init__里做一次，但这里保证不会重复初始化）
-    seat_coords = [seat["box1"] for seat in config.SEATS if any(seat["box1"])]
-    if not hasattr(self, "seat_manager"):
-        self.seat_manager = SeatManager(seat_coords, min_empty=2)
-
-    while ctx.current_guest_index < len(ctx.guests):
-        guest_index = ctx.current_guest_index
-        guest = ctx.current_guest
-
-        pan_tilt.home()
-        agv.navigate_to(agv.get_current_station(), config.STATION_START)
-        wait_nav(timeout=config.NAV_TIMEOUT)
-
-        # ==== 空座位识别能力接口调用 START ====
-        for _ in range(3):
-            color_frame, _ = self._cam_head.get_frames()
-            if color_frame is None:
-                continue
-            person_boxes = self.gaze_api.detect_persons(color_frame)
-            self.seat_manager.update_from_detections(person_boxes)
-            time.sleep(0.08)
-        seat_status = self.seat_manager.seat_status
-        print(f"当前座位状态: {seat_status}")
-
-        # 当前帧用摄像头中心点作为robot_pose（像素坐标）
-        h, w = color_frame.shape[:2]
-        robot_pose = (w // 2, h // 2)
-
-        # 获取所有空座位的索引
-        empty_indices = [i for i, s in enumerate(seat_status) if s == "empty"]
-        print(f"当前空座位编号: {empty_indices}")
-
-        # 分配空座位（这里分配第一个空座位给当前客人）
-        if empty_indices:
-            seat_idx = empty_indices[0]
-            seat_id = config.SEATS[seat_idx]["id"]
-        else:
-            seat_id = None
-        # ==== 空座位识别能力接口调用 END ====
-    
-=======
         while ctx.current_guest_index < len(ctx.guests):
 
             agv.navigate_to(agv.get_current_station(), config.STATION_START)
@@ -152,7 +110,6 @@ class ReceiveGuest(State):
             guest = ctx.current_guest
             log.info("========== 接待客人 #%d ==========", guest_index)
 
->>>>>>> 59c9b2b (删除复件)
             # 等待门铃
             doorbell.start()
             detected = doorbell.wait_for_doorbell(timeout=60)
