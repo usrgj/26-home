@@ -59,52 +59,59 @@ class ReceiveGuest(State):
         self._cam_chest = camera_manager.get(CAMERA_CHEST)
         self._feature_jobs: dict[int, FeatureExtractionJob] = {}
         seat_coords = [seat["box1"] for seat in config.SEATS if any(seat["box1"])]
-        if not hasattr(self, "seat_manager"):
-            self.seat_manager = SeatManager(seat_coords, min_empty=2)
+        self.seat_manager = SeatManager(seat_coords, min_empty=2)
+        self.gaze_api = GazeAPI('yolov8n.pt')
+        
     def execute(self, ctx) -> str:
         model = self._get_model()
         self._feature_jobs = {}
         voice_assistant.set_recording(1)
 
-    # 初始化座位管理器（建议在__init__里做一次，但这里保证不会重复初始化）
-    seat_coords = [seat["box1"] for seat in config.SEATS if any(seat["box1"])]
-    if not hasattr(self, "seat_manager"):
-        self.seat_manager = SeatManager(seat_coords, min_empty=2)
+        # 初始化座位管理器（建议在__init__里做一次，但这里保证不会重复初始化）
+        seat_coords = [seat["box1"] for seat in config.SEATS if any(seat["box1"])]
+        if not hasattr(self, "seat_manager"):
+            self.seat_manager = SeatManager(seat_coords, min_empty=2)
 
-    while ctx.current_guest_index < len(ctx.guests):
-        guest_index = ctx.current_guest_index
-        guest = ctx.current_guest
+        while ctx.current_guest_index < len(ctx.guests):
+            guest_index = ctx.current_guest_index
+            guest = ctx.current_guest
 
-        pan_tilt.home()
-        agv.navigate_to(agv.get_current_station(), config.STATION_START)
-        wait_nav(timeout=config.NAV_TIMEOUT)
+            pan_tilt.home()
+            agv.navigate_to(agv.get_current_station(), config.STATION_START)
+            wait_nav(timeout=config.NAV_TIMEOUT)
 
-        # ==== 空座位识别能力接口调用 START ====
-        for _ in range(3):
-            color_frame, _ = self._cam_head.get_frames()
-            if color_frame is None:
-                continue
-            person_boxes = self.gaze_api.detect_persons(color_frame)
-            self.seat_manager.update_from_detections(person_boxes)
-            time.sleep(0.08)
-        seat_status = self.seat_manager.seat_status
-        print(f"当前座位状态: {seat_status}")
-
-        # 当前帧用摄像头中心点作为robot_pose（像素坐标）
-        h, w = color_frame.shape[:2]
-        robot_pose = (w // 2, h // 2)
-
-        # 获取所有空座位的索引
-        empty_indices = [i for i, s in enumerate(seat_status) if s == "empty"]
-        print(f"当前空座位编号: {empty_indices}")
-
-        # 分配空座位（这里分配第一个空座位给当前客人）
-        if empty_indices:
-            seat_idx = empty_indices[0]
-            seat_id = config.SEATS[seat_idx]["id"]
-        else:
-            seat_id = None
-        # ==== 空座位识别能力接口调用 END ====
+            # ==== 空座位识别能力接口调用 START ====
+            for _ in range(3):
+                color_frame, _ = self._cam_chest.get_frames()
+                if color_frame is None:
+                    continue
+                person_boxes = self.gaze_api.detect_persons(color_frame)
+                self.seat_manager.update_from_detections(person_boxes)
+                frame = color_frame.copy() 
+                 # 画座位框
+                for idx, seat in enumerate(self.seat_manager.seat_coords):
+                    color = (0,255,0) if self.seat_manager.seat_status[idx] == "empty" else (0,0,255)
+                    cv2.rectangle(frame, (seat[0], seat[1]), (seat[2], seat[3]), color, 2)
+                    cv2.putText(frame, f"{idx+1}:{self.seat_manager.seat_status[idx]}", (seat[0], seat[1]-10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                # 画人体框
+                for box in person_boxes:
+                    cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (255,255,0), 2)
+                cv2.imshow('Seat Status', frame)
+                cv2.waitKey(1)
+                time.sleep(0.08)
+            seat_status = self.seat_manager.seat_status
+            print(f"当前座位状态: {seat_status}")
+            # 只输出所有空座位编号
+            empty_indices = [i for i, s in enumerate(seat_status) if s == "empty"]
+            print(f"当前空座位编号: {empty_indices}")
+            # 分配空座位（这里分配第一个空座位给当前客人）
+            if empty_indices:
+                seat_idx = empty_indices[0]
+                seat_id = config.SEATS[seat_idx]["id"]
+            else:
+                seat_id = None
+            # ==== 空座位识别能力接口调用 END ====
     
             # 等待门铃
             doorbell.start()
@@ -145,9 +152,22 @@ class ReceiveGuest(State):
             if seat_id is None:
                 agv.navigate_to(agv.get_current_station(), config.STATION_OBSERVATION)
                 wait_nav(timeout=config.NAV_TIMEOUT)
-                update_seats(ctx, model, self._cam_head, box_key="box2")
-                seat_id = ctx.find_free_seat()
-
+                # 再采集多帧
+                for _ in range(3):
+                    color_frame, _ = self._cam_head.get_frames()
+                    if color_frame is None:
+                        continue
+                    person_boxes = self.gaze_api.detect_persons(color_frame)
+                    self.seat_manager.update_from_detections(person_boxes)
+                    time.sleep(0.08)
+                seat_status = self.seat_manager.seat_status
+                empty_indices = [i for i, s in enumerate(seat_status) if s == "empty"]
+                if empty_indices:
+                    seat_idx = empty_indices[0]
+                    seat_id = config.SEATS[seat_idx]["id"]
+                else:
+                    seat_id = None
+            
             if seat_id is not None:
                 nav_id, angle = _get_seat_navigation_target(seat_id)
                 voice_assistant.speak("Please follow me, I will show you to your seat.")
@@ -194,7 +214,6 @@ def quest_and_answer(text: str) -> str:
     return ""
 
 
-
 def _record_and_recognize_text() -> str:
     """录制一段语音并调用现有识别接口。"""
     audio_frames = voice_assistant.record_utterance()
@@ -206,7 +225,6 @@ def _record_and_recognize_text() -> str:
         return (recognize_speech(audio_frames) or "").strip()
 
     return (voice_assistant.recognize(audio_frames) or "").strip()
-
 
 
 def update_seats(ctx, yolo_model, camera, box_key: str) -> None:
@@ -452,37 +470,6 @@ def _score_person_crop(bbox: tuple[int, int, int, int], frame_w: int, frame_h: i
     center_penalty = abs(center_x - frame_w / 2.0) / frame_w + abs(center_y - frame_h / 2.0) / frame_h
     return area_ratio * 100.0 - center_penalty * 10.0
 
-
-def _is_valid_bbox(bbox: tuple[int, int, int, int]) -> bool:
-    x1, y1, x2, y2 = bbox
-    return x2 > x1 and y2 > y1
-
-
-def _person_overlaps_seat(
-    person_bbox: tuple[int, int, int, int],
-    seat_bbox: tuple[int, int, int, int],
-) -> bool:
-    """用重叠和下半身位置做简单座位占用判断。"""
-    px1, py1, px2, py2 = person_bbox
-    sx1, sy1, sx2, sy2 = seat_bbox
-
-    inter_x1 = max(px1, sx1)
-    inter_y1 = max(py1, sy1)
-    inter_x2 = min(px2, sx2)
-    inter_y2 = min(py2, sy2)
-    if inter_x2 <= inter_x1 or inter_y2 <= inter_y1:
-        return False
-
-    inter_area = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
-    seat_area = max(1, (sx2 - sx1) * (sy2 - sy1))
-    overlap_ratio = inter_area / seat_area
-    center_x = (px1 + px2) / 2.0
-    bottom_y = py2
-    legs_in_seat = sx1 <= center_x <= sx2 and sy1 <= bottom_y <= sy2 + 0.15 * (sy2 - sy1)
-    return overlap_ratio >= 0.3
-
-
 def _bbox_area(bbox: tuple[int, int, int, int]) -> int:
     x1, y1, x2, y2 = bbox
     return max(0, x2 - x1) * max(0, y2 - y1)
-
