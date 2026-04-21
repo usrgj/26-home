@@ -141,6 +141,7 @@ def _build_intro_text(listener, subject, subject_index: int) -> str:
     favorite_drink = (getattr(subject, "favorite_drink", "") or "").strip()
     subject_features = getattr(subject, "visual_features", {}) or {}
 
+<<<<<<< HEAD
     if LANGUAGE == "en":
         listener_label = listener_name or "this guest"
         subject_label = subject_name or _get_guest_fallback_name_en(subject_index)
@@ -151,6 +152,92 @@ def _build_intro_text(listener, subject, subject_index: int) -> str:
         if feature_phrase:
             sentences.append(f"{subject_label} {feature_phrase}.")
         return " ".join(sentences)
+=======
+    fallback_names = {
+        True: ("the first guest", "the second guest"),
+        False: ("第一位客人", "第二位客人"),
+    }
+    subject_fallbacks = fallback_names[is_en]
+    
+    subject_fallback = subject_fallbacks[0] if subject_index == 0 else subject_fallbacks[1] # index为0时介绍第一位客人，index为1时介绍第二位客人
+
+    listener_label = listener_name or ("this guest" if is_en else "这位客人")
+    subject_label = subject_name or subject_fallback
+    
+    # 构建视觉特征描述文案，因为只需要描述一位客人，所以只当index为0时生效
+    feature_phrase = (
+        build_visual_feature_phrase(subject_features)
+        if subject_index == 0 else ""
+    )
+
+    if is_en:
+        # 英文介绍
+        text = f"{listener_label}, that is {subject_label}."
+        if favorite_drink:
+            text += f" {subject_label}'s favorite drink is {favorite_drink}."
+        if feature_phrase:
+            # feature_phrase 已包含主语（如 "He is wearing a hat and glasses"）
+            text += f" {feature_phrase}"
+        return text
+    
+    else:
+        text = f"{listener_label}，"
+        if feature_phrase:
+            text += feature_phrase
+        text += f"他是{subject_label}。"
+        if favorite_drink:
+            text += f"他最喜欢的饮料是{favorite_drink}。"
+
+        return text
+
+def build_visual_feature_phrase(features: dict) -> str:
+    '''
+    构建视觉描述文本（英文）
+    '''
+    result = ""
+    # 不定特征
+    hair_color = features.get("hair_color")
+    clothing_color = features.get("clothing_color")
+    
+    # 二元特征
+    gender = features.get("gender")
+    
+    # 布尔特征
+    hat = features.get("hat")
+    glasses = features.get("glasses")
+    
+    if LANGUAGE == "en":
+        # 英文描述，例如 "He is wearing a hat and glasses, with black hair and a red shirt."
+        # 注意：为了自然，我们构建一个以主语开头的句子（主语由调用方补充）
+        # 这里返回的短语应该可以直接接在主语后面，例如 " is wearing a hat..."
+        # 但调用方会写成 "{subject_label} {feature_phrase}"，所以 feature_phrase 应以动词或形容词开头
+        # 简单起见，返回一个完整的小句（不带主语），由调用方拼接
+        parts = []
+        if hat and glasses:
+            parts.append("wearing a hat and glasses")
+        elif hat:
+            parts.append("wearing a hat")
+        elif glasses:
+            parts.append("wearing glasses")
+        
+        if hair_color:
+            parts.append(f"has {hair_color} hair")
+        if clothing_color:
+            parts.append(f"is wearing {clothing_color} clothes")
+        if gender:
+            # gender 可能是 "male" 或 "female"，可转换为 "a man" / "a woman"
+            gender_word = "a man" if gender.lower() == "male" else "a woman" if gender.lower() == "female" else gender
+            parts.insert(0, f"is {gender_word}")
+        
+        if parts:
+            # 组合成 "is a man, wearing a hat and glasses, has black hair"
+            # 但更好的语法：第一个部分如果是 "is a man" 则不加逗号，后续用逗号
+            result = ", ".join(parts)
+            # 确保句子开头大写（调用方会处理）
+        else:
+            result = ""
+        return result
+>>>>>>> dev
     else:
         # 中文版本
         listener_label = listener_name or "这位客人"
@@ -211,6 +298,7 @@ def _build_visual_feature_phrase_zh(features: dict) -> str:
         elif "female" in gender.lower():
             parts.append("女性")
         else:
+<<<<<<< HEAD
             parts.append(gender)
     hair_color = str(features.get("hair color", "")).strip()
     if hair_color:
@@ -227,3 +315,23 @@ def _build_visual_feature_phrase_zh(features: dict) -> str:
     if not parts:
         return ""
     return "，".join(parts)
+=======
+            result += "没戴帽子，"
+        
+        if glasses:
+            result += "戴着眼镜，"
+        else:
+            result += "没戴眼镜，"
+            
+        if hair_color:
+            result += "%s头发，" % hair_color
+            
+        if clothing_color:
+            result += "穿着%s衣服的" % clothing_color
+        
+        if gender:
+            result += gender
+            
+        result += "客人，"
+        return result
+>>>>>>> dev
