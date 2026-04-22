@@ -28,21 +28,15 @@ class ReceiveBag(State):
 
     def execute(self, ctx) -> str:
         
-        # 根据语言选择提示语
-        if LANGUAGE == "en":
-            speak_text = "Please hand me the bag, I will take it for you."
-        else:
-            speak_text = "请把包递给我，我来帮你拿。"
-
         # 1. 面向第二位客人
-        target_degree = config.INTRO_LOOK_ANGLES_DEG.get(agv.get_current_station(), {}).get(ctx.guests[1].seat_id)
-        angle = math.radians(target_degree)
+        # target_degree = config.INTRO_LOOK_ANGLES_DEG.get(agv.get_current_station(), {}).get(ctx.guests[1].seat_id)
+        # angle = math.radians(target_degree)
         
-        agv.navigate_to(agv.get_current_station(), agv.get_current_station(), angle=angle)
+        # agv.navigate_to(agv.get_current_station(), agv.get_current_station(), angle=angle)
 
 
         # 2. 请求递包
-        voice_assistant.speak(speak_text)
+        voice_assistant.speak("Please pass me your bag, and I’ll help you with it.")
 
         # 3. 机械臂到接包位置，夹爪张开
         print(left_arm.rm_movej([-83.018,-42.675,-73.002,-16.54,-29.304,52.168], 20, 0, 0, 1))

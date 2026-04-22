@@ -13,8 +13,8 @@ ARM_PORT = 8080
 
 left_arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)
 left_arm.rm_create_robot_arm(LEFT_ARM_IP, ARM_PORT)
-# right_arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)
-# right_arm.rm_create_robot_arm(RIGHT_ARM_IP, ARM_PORT)
+right_arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)
+right_arm.rm_create_robot_arm(RIGHT_ARM_IP, ARM_PORT)
 
 # code = left_arm.rm_movej(LEFT_TARGET_JOINTS, v=SPEED, r=0, connect=0, block=1)
 # code = right_arm.rm_movej(RIGHT_TARGET_JOINTS, v=SPEED, r=0, connect=0, block=1)

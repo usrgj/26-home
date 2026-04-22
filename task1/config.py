@@ -37,21 +37,21 @@ SEATS_MAPPING = [
 # 键2 = 需要看向的目标座位
 # 值 = 底盘原地转向的目标角度（度）
 INTRO_LOOK_ANGLES_DEG = {
-    "seat_nav1": {
+    STATION_SEAT1: {
         "seat_1": 81.033,
         "seat_2": 8.405,
         "seat_3": 29.209,
         "seat_4": 58.281,
         "seat_5": 81.033,
     },
-    "seat_nav2": {
+    STATION_SEAT2: {
         "seat_1": -142.277,
         "seat_2": -124.590,
         "seat_3": -91.496,
         "seat_4": 173.858,
         "seat_5": -167.985,
     },
-    "seat_nav3": {
+    STATION_SEAT3: {
         "seat_1": -92.636,
         "seat_2": -68.807,
         "seat_3": -43.745,

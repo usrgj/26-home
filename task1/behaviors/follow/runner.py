@@ -227,9 +227,10 @@ class FollowRunner:
                 # LiDAR 同时承担两件事：提供人物候选，以及提供避障扇区。
                 scans = self._robot_api.get_lidar_scans()
                 if scans:
-                    print("get lidar scans success")
                     lidar_candidates = self._lidar_proc.process(scans, robot_pose)
                     obstacle_sectors = self._lidar_proc.get_obstacle_sectors(scans)
+                else :
+                    print("get lidar scans error")
             except NotImplementedError:
                 pass
             except Exception as exc:
