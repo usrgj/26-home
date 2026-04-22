@@ -82,6 +82,11 @@ class FollowRunner:
         return self._target_locked
 
     def start(self, lock_target: bool = True, target_camera: str = "head") -> bool:
+        """
+        启动跟随运行器并尝试锁定初始目标。
+
+        返回值表示启动阶段是否已经通过视觉成功锁定了目标人物。
+        """
         if self._closed:
             raise RuntimeError("FollowRunner 已关闭，不能再次启动")
 
@@ -140,7 +145,10 @@ class FollowRunner:
         return self._target_locked
 
     def step(self) -> FollowStepResult:
-        """执行一个跟随控制周期。"""
+        """
+        跟随的主逻辑
+        执行一个跟随控制周期。
+        """
         if not self._running:
             raise RuntimeError("FollowRunner 尚未启动，请先调用 start()")
 
@@ -216,10 +224,13 @@ class FollowRunner:
             obstacle_sectors = np.full(72, 40.0)
 
             try:
+                # LiDAR 同时承担两件事：提供人物候选，以及提供避障扇区。
                 scans = self._robot_api.get_lidar_scans()
                 if scans:
                     lidar_candidates = self._lidar_proc.process(scans, robot_pose)
                     obstacle_sectors = self._lidar_proc.get_obstacle_sectors(scans)
+                else :
+                    print("get lidar scans error")
             except NotImplementedError:
                 pass
             except Exception as exc:
@@ -232,6 +243,7 @@ class FollowRunner:
 
             if self._loop_count % self._vision_interval == 0:
                 try:
+                    # 视觉频率通常低于主循环频率，因此按固定周期抽样执行。
                     vision_detections = self._vision_det.detect(self._robot_api, robot_pose)
                     for det in vision_detections:
                         if det.is_target:
@@ -239,6 +251,7 @@ class FollowRunner:
                             break
 
                     if target_detection is None and not self._target_locked and vision_detections:
+                        # 启动时未锁定成功，则在运行中退化为“锁最近的人”。
                         nearest = min(vision_detections, key=lambda d: d.depth)
                         self._vision_det.lock_target(nearest)
                         target_detection = nearest
@@ -255,6 +268,7 @@ class FollowRunner:
             now = time.time()
 
             if target_detection is not None:
+                # 视觉观测优先更新，并顺带刷新给 LiDAR 关联使用的视觉锚点。
                 self._fusion.update_with_vision(target_detection)
                 self._fusion.set_vision_anchor(
                     target_detection.world_x,
@@ -263,11 +277,13 @@ class FollowRunner:
 
             matched_lidar = None
             if lidar_candidates:
+                # LiDAR 候选需要先和当前目标做关联，避免多人环境下串人。
                 matched_lidar = self._fusion.associate_lidar_candidates(lidar_candidates)
                 if matched_lidar is not None:
                     self._fusion.update_with_lidar(matched_lidar)
 
             if target_detection is None and matched_lidar is None:
+                # 两类传感器都没有命中时，只保留运动模型预测。
                 self._fusion.predict_only(now)
 
             target_state = self._fusion.get_target_state()
@@ -390,6 +406,7 @@ class FollowRunner:
                 self._closed = True
 
     def _ensure_initialized(self) -> None:
+        """按需实例化依赖模块，并确保地图只加载一次。"""
         if self._initialized:
             return
 
@@ -404,6 +421,7 @@ class FollowRunner:
         self._initialized = True
 
     def _load_map(self) -> None:
+        """优先加载预处理地图；没有文件时再尝试从在线接口获取。"""
         logger.info("正在加载全局地图...")
         if self._map_points_npy_path:
             self._lidar_proc.load_map_from_npy(self._map_points_npy_path)
@@ -429,6 +447,7 @@ class FollowRunner:
         vision_count: int,
         lidar_count: int,
     ) -> FollowStepResult:
+        """补足循环周期、缓存末态，并返回本周期摘要结果。"""
         elapsed = time.time() - loop_start
         sleep_time = self._loop_period - elapsed
         if sleep_time > 0:

@@ -31,6 +31,7 @@ logger = logging.getLogger("FollowMain")
 
 
 def _configure_logging() -> None:
+    """为独立运行入口配置统一日志格式。"""
     logging.basicConfig(
         level=getattr(logging, LOG_LEVEL),
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
@@ -40,12 +41,13 @@ def _configure_logging() -> None:
 
 def main() -> None:
     """独立运行人物跟随系统。"""
-    _configure_logging()
+    _configure_logging() 
 
     stop_requested = {"value": False}
     previous_handler = signal.getsignal(signal.SIGINT)
 
     def _signal_handler(sig, frame):
+        """只置退出标志，让清理逻辑统一走 finally。"""
         stop_requested["value"] = True
         print("\n收到退出信号，正在停止...")
 

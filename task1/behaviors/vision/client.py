@@ -80,7 +80,7 @@ def analyze_person_features(image_path):
         )
         
         text_result = chat_response.choices[0].message.content
-        print(f"原始响应: {text_result}")
+        # print(f"原始响应: {text_result}")
 
         # ===================== 在这里加入清理 =====================
         text_result = clean_response_text(text_result)

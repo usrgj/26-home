@@ -51,7 +51,7 @@ class PersonDetection:
 class VisionDetector:
     """视觉检测器"""
     
-    def __init__(self):
+    def __init__(self, ):
         """
         初始化检测模型。
         """
@@ -227,6 +227,10 @@ class VisionDetector:
     
     def _get_depth_at_bbox(self, depth_image: Optional[np.ndarray],
                            x1: int, y1: int, x2: int, y2: int) -> float:
+        '''
+        获取检测框中的深度
+        '''
+        
         if depth_image is None:
             return -1.0
         

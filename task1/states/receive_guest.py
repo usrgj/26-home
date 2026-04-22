@@ -20,7 +20,7 @@ from ultralytics import YOLO
 
 from common.config import (CAMERA_HEAD,CAMERA_CHEST)
 from common.skills.agv_api import agv, wait_nav
-from common.skills.arm import left_arm, right_arm
+from common.skills.arm import left_arm
 from common.skills.audio_module.voice_assiant import (
     doorbell,
     extract_drink,
@@ -38,7 +38,6 @@ _DEFAULT_DETECTION_CONF = 0.35
 _GUEST_CROP_WINDOW_S = 2.0
 _GUEST_CROP_MAX_SAMPLES = 5
 _FEATURE_WAIT_TIMEOUT_S = 2.0
-_GAZE_LOOP_INTERVAL_S = 0.1
 
 
 @dataclass
@@ -60,10 +59,11 @@ class ReceiveGuest(State):
         self._feature_jobs: dict[int, FeatureExtractionJob] = {}
         seat_coords = [seat["box1"] for seat in config.SEATS if any(seat["box1"])]
         self.seat_manager = SeatManager(seat_coords, min_empty=2)
-        self.gaze_api = GazeAPI('yolov8n.pt')
+
         
     def execute(self, ctx) -> str:
-        model = self._get_model()
+        self._model = self._get_model()
+        self.gaze_api = GazeAPI(self._model)
         self._feature_jobs = {}
         voice_assistant.set_recording(1)
 
@@ -75,12 +75,12 @@ class ReceiveGuest(State):
         while ctx.current_guest_index < len(ctx.guests):
             guest_index = ctx.current_guest_index
             guest = ctx.current_guest
-
+        
             pan_tilt.home()
             agv.navigate_to(agv.get_current_station(), config.STATION_START)
             wait_nav(timeout=config.NAV_TIMEOUT)
 
-            # ==== 空座位识别能力接口调用 START ====
+            # ==== 空座位识别能力接口调用 START ==== author:xxy
             for _ in range(3):
                 color_frame, _ = self._cam_chest.get_frames()
                 if color_frame is None:
@@ -115,23 +115,26 @@ class ReceiveGuest(State):
     
             # 等待门铃
             doorbell.start()
-            doorbell.wait_for_doorbell(timeout=30)
+            is_detected = doorbell.wait_for_doorbell(timeout=30)
             doorbell.stop()
-            log.info("门铃检测结果: %s", "detected" if detected else "timeout")
+            print("检测到门铃" if is_detected else "等待门铃超时")
+            
             # 导航到门口
             agv.navigate_to(config.STATION_START, config.STATION_DOOR)
             wait_nav(timeout=config.NAV_TIMEOUT)
 
             # TODO 开门
-            # 注视
+            
+            # 注视 author:xxy
             gaze_thread, gaze_stop_event = self.gaze_api.start_gaze_tracking_nearest_person(pan_tilt, self._cam_head, duration=45)
             # 询问姓名和喜爱饮品，同时在后台提取视觉特征
             try:
                 text = quest_and_answer("Welcome! May I know your name ?")
                 guest.name = extract_name(text)
+                print(f"the guest's name is {guest.name}")
 
                 if guest_index == 0:
-                    crop = _select_best_guest_crop(model, self._cam_head)
+                    crop = _select_best_guest_crop(self._model, self._cam_head)
                     if crop is not None:
                         self._feature_jobs[guest_index] = _start_feature_extraction(
                             guest_index=guest_index,
@@ -140,6 +143,8 @@ class ReceiveGuest(State):
 
                 text = quest_and_answer("What is your favorite drink ?")
                 guest.favorite_drink = extract_drink(text)
+                print(f"the guest's favorite drink is {guest.favorite_drink}")
+                
             finally:
                 # 结束注视
                 gaze_stop_event.set()
@@ -174,12 +179,18 @@ class ReceiveGuest(State):
                 pan_tilt.home()
                 agv.navigate_to(agv.get_current_station() or "", nav_id, angle)
                 wait_nav(timeout=config.NAV_TIMEOUT)
+                
+                left_arm.rm_movej([-44.246,-59.463,-58.874,20.883,0.296,12.781], 20, 0, 0, 0)
+                
                 voice_assistant.speak("Please have a seat here.")
 
                 guest.seat_id = seat_id
                 ctx.occupy_seat(seat_id)
             else:
                 voice_assistant.speak("I'm sorry, there are no free seats available.")
+
+            left_arm.rm_movej(config.LEFT_HOME_JOINTS, 20, 0, 0, 0)
+            
 
             ctx.current_guest_index += 1
 
@@ -226,32 +237,6 @@ def _record_and_recognize_text() -> str:
 
     return (voice_assistant.recognize(audio_frames) or "").strip()
 
-
-def update_seats(ctx, yolo_model, camera, box_key: str) -> None:
-    """用当前视角里可见的座位框更新占用状态。
-    boxe key就是对应的座位框，第一个观察用 box1，第二次观察用 box2，后续如果需要再加 box3 之类的
-    """
-    color_frame, depth_frame = _wait_for_latest_frame(camera, timeout_s=1.5)
-    if color_frame is None:
-        return
-
-    person_boxes = _detect_person_boxes(
-        yolo_model,
-        color_frame,
-        conf=_DEFAULT_DETECTION_CONF,
-        person_class_id=0,
-    )
-
-    for seat in ctx.seats:
-        seat_box = tuple(seat.get(box_key, (0, 0, 0, 0)))
-        if not _is_valid_bbox(seat_box):
-            continue
-
-        occupied = any(_person_overlaps_seat(person_box, seat_box) for person_box in person_boxes)
-        if occupied:
-            seat["occupied"] = True
-        elif seat["occupied"] is None:
-            seat["occupied"] = False
 
 
 def _get_seat_navigation_target(seat_id: str) -> tuple[str, float]:
