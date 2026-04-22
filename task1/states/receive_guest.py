@@ -20,7 +20,7 @@ from ultralytics import YOLO
 
 from common.config import (CAMERA_HEAD,CAMERA_CHEST)
 from common.skills.agv_api import agv, wait_nav
-from common.skills.arm import left_arm, right_arm
+from common.skills.arm import left_arm
 from common.skills.audio_module.voice_assiant import (
     doorbell,
     extract_drink,
@@ -75,7 +75,7 @@ class ReceiveGuest(State):
         while ctx.current_guest_index < len(ctx.guests):
             guest_index = ctx.current_guest_index
             guest = ctx.current_guest
-
+        
             pan_tilt.home()
             agv.navigate_to(agv.get_current_station(), config.STATION_START)
             wait_nav(timeout=config.NAV_TIMEOUT)
@@ -179,12 +179,18 @@ class ReceiveGuest(State):
                 pan_tilt.home()
                 agv.navigate_to(agv.get_current_station() or "", nav_id, angle)
                 wait_nav(timeout=config.NAV_TIMEOUT)
+                
+                left_arm.rm_movej([-44.246,-59.463,-58.874,20.883,0.296,12.781], 20, 0, 0, 0)
+                
                 voice_assistant.speak("Please have a seat here.")
 
                 guest.seat_id = seat_id
                 ctx.occupy_seat(seat_id)
             else:
                 voice_assistant.speak("I'm sorry, there are no free seats available.")
+
+            left_arm.rm_movej(config.LEFT_HOME_JOINTS, 20, 0, 0, 0)
+            
 
             ctx.current_guest_index += 1
 

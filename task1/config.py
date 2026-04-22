@@ -25,11 +25,11 @@ PRE_OCCUPIED_SEATS = []
 
 # 位置对应的导航站点；此处 angle 仍沿用导航接口既有配置语义
 SEATS_MAPPING = [
-    {"seat_id": "seat_1", "nav_id": STATION_SEAT1, "angle": 69.414},
-    {"seat_id": "seat_2", "nav_id": STATION_SEAT1, "angle": 5.466},
-    {"seat_id": "seat_3", "nav_id": STATION_SEAT2, "angle": -109.08},
-    {"seat_id": "seat_4", "nav_id": STATION_SEAT2, "angle": 166.559},
-    {"seat_id": "seat_5", "nav_id": STATION_SEAT3, "angle": -92.636},
+    {"seat_id": "seat_1", "nav_id": STATION_SEAT1, "angle": 87.766},
+    {"seat_id": "seat_2", "nav_id": STATION_SEAT1, "angle": 18.850},
+    {"seat_id": "seat_3", "nav_id": STATION_SEAT2, "angle": -102.325},
+    {"seat_id": "seat_4", "nav_id": STATION_SEAT2, "angle": -176.202},
+    {"seat_id": "seat_5", "nav_id": STATION_SEAT3, "angle": -102.863},
 ]
 
 # 介绍阶段使用的朝向配置：
@@ -76,7 +76,7 @@ FOLLOW_HOST_TIMEOUT = 90   # 跟随主人阶段超时
 ARM_RECEIVE_BAG = 500000
 ARM_PLACE_BAG = 300000
 ARM_HOME = 0
-LEFT_HOME_JOINTS = [-29.1, -95.6, -53.0, 0.1, -34.6, 0]  # 初始关节角度（度）
+LEFT_HOME_JOINTS = [-4.297, -97.695, -22.042, 18.172, -12.501, 0]  # 初始关节角度（度）
 RIGHT_HOME_JOINTS = [30.0, -94.4, -25.7, -60.9, -31.6, 0]  # 初始关节角度（度）
 ARM_SPEED = 40  # 运动速度 1~100
 

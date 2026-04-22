@@ -16,6 +16,7 @@ import threading
 from common.state_machine import State
 # from common.skills.arm import left_arm, right_arm, left_gripper
 from common.skills.arm import left_arm,  left_gripper
+from common.skills.slide_control import slide_control
 from task1 import config
 from task1.behaviors.follow import FollowRunner
 
@@ -62,21 +63,17 @@ class FollowAndPlace(State):
         # ── 放置包 (+50) ──
 
         # 4. 机械臂到放包高度
-        left_arm.rm_movej([-99.705,-89.426,-9.176,-87.258,79.38,-246.351], 20, 0, 0, 1)
-        left_gripper.open()
-        time.sleep(3)
+        
+        # 如果有需要，让导轨移动到指定高度
+        # slide_control.device_speed_set(450)
+        # slide_control.send_axis(-6000000)
+        
+        left_arm.rm_movej([-28.892,-116.165,31.102,-92.11,30.507,35.392], 25, 0, 0, 1)
+        left_gripper.set_route(0, 1000)
+        left_gripper.open(block=True)
+        left_arm.rm_movej([-28.892,-116.165,38,-92.11,30.507,35.392], 40, 0, 0, 1)
+        left_arm.rm_movej([-28.892,-116.165,23.102,-92.11,30.507,35.392], 40, 0, 0, 1)
 
-        # 5. 夹爪张开释放
-        # arm.release()
-
-        # 6. 机械臂归位
-        # arm.go_home()
-        left_gripper.grab(force=500)
-        time.sleep(3)
-        left_arm.rm_movej([-112.305,-115.771,-67.401,2.997,7.318,-263.746], 20, 0, 0, 1)
-        print(left_gripper.state)
-
-        # speech.say("The bag has been placed.")
         return "release"
 
 
