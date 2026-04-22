@@ -67,11 +67,6 @@ class ReceiveGuest(State):
         self._feature_jobs = {}
         voice_assistant.set_recording(1)
 
-        # 初始化座位管理器（建议在__init__里做一次，但这里保证不会重复初始化）
-        seat_coords = [seat["box1"] for seat in config.SEATS if any(seat["box1"])]
-        if not hasattr(self, "seat_manager"):
-            self.seat_manager = SeatManager(seat_coords, min_empty=2)
-
         while ctx.current_guest_index < len(ctx.guests):
             guest_index = ctx.current_guest_index
             guest = ctx.current_guest
@@ -79,16 +74,17 @@ class ReceiveGuest(State):
             pan_tilt.home()
             agv.navigate_to(agv.get_current_station(), config.STATION_START)
             wait_nav(timeout=config.NAV_TIMEOUT)
+            #==== 空座位识别能力接口调用 START ==== author:xxy
 
-            # ==== 空座位识别能力接口调用 START ==== author:xxy
-            for _ in range(3):
+            max_attempts=5
+            for _ in range(max_attempts=5):
                 color_frame, _ = self._cam_chest.get_frames()
                 if color_frame is None:
                     continue
                 person_boxes = self.gaze_api.detect_persons(color_frame)
                 self.seat_manager.update_from_detections(person_boxes)
-                frame = color_frame.copy() 
                  # 画座位框
+                frame = color_frame.copy() 
                 for idx, seat in enumerate(self.seat_manager.seat_coords):
                     color = (0,255,0) if self.seat_manager.seat_status[idx] == "empty" else (0,0,255)
                     cv2.rectangle(frame, (seat[0], seat[1]), (seat[2], seat[3]), color, 2)
@@ -102,16 +98,14 @@ class ReceiveGuest(State):
                 time.sleep(0.08)
             seat_status = self.seat_manager.seat_status
             print(f"当前座位状态: {seat_status}")
-            # 只输出所有空座位编号
             empty_indices = [i for i, s in enumerate(seat_status) if s == "empty"]
             print(f"当前空座位编号: {empty_indices}")
-            # 分配空座位（这里分配第一个空座位给当前客人）
+            # 分配空座位
             if empty_indices:
                 seat_idx = empty_indices[0]
-                seat_id = config.SEATS[seat_idx]["id"]
+                seat_id = config.SEATS[seat_idx]["id"]   
             else:
                 seat_id = None
-            # ==== 空座位识别能力接口调用 END ====
     
             # 等待门铃
             doorbell.start()
@@ -172,7 +166,13 @@ class ReceiveGuest(State):
                     seat_id = config.SEATS[seat_idx]["id"]
                 else:
                     seat_id = None
-            
+            if seat_id is None:
+                # 默认导航到某个备选点/接待区
+                nav_id, angle = _get_seat_navigation_target("seat_default")
+                agv.navigate_to(agv.get_current_station() or "", nav_id, angle)
+                wait_nav(timeout=config.NAV_TIMEOUT)
+                voice_assistant.speak("Sorry, no free seat detected, please wait for staff assistance.")
+                        
             if seat_id is not None:
                 nav_id, angle = _get_seat_navigation_target(seat_id)
                 voice_assistant.speak("Please follow me, I will show you to your seat.")
@@ -183,7 +183,6 @@ class ReceiveGuest(State):
                 left_arm.rm_movej([-44.246,-59.463,-58.874,20.883,0.296,12.781], 20, 0, 0, 0)
                 
                 voice_assistant.speak("Please have a seat here.")
-
                 guest.seat_id = seat_id
                 ctx.occupy_seat(seat_id)
             else:
