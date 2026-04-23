@@ -20,7 +20,7 @@ from ultralytics import YOLO
 
 from common.config import (CAMERA_HEAD,CAMERA_CHEST)
 from common.skills.agv_api import agv, wait_nav
-from common.skills.arm import left_arm
+from common.skills.arm import left_arm, left_gripper
 from common.skills.audio_module.voice_assiant import (
     doorbell,
     extract_drink,
@@ -62,6 +62,7 @@ class ReceiveGuest(State):
 
         
     def execute(self, ctx) -> str:
+        from common.utils.drag_and_play.dragTeach_play import play_robot_trajectory
         self._model = self._get_model()
         self.gaze_api = GazeAPI(self._model)
         self._feature_jobs = {}
@@ -120,6 +121,15 @@ class ReceiveGuest(State):
             wait_nav(timeout=config.NAV_TIMEOUT)
 
             # TODO 开门
+            left_gripper.open()
+            success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_GET_PATH, arm=left_arm)
+            left_gripper.grab(force=700, block=True, timeout=5)
+            success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_MOVE_PATH, arm=left_arm)
+            left_gripper.open(block=True)
+            success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_LEAVE_PATH, arm=left_arm)
+            
+            
+            
             
             # 注视 author:xxy
             gaze_thread, gaze_stop_event = self.gaze_api.start_gaze_tracking_nearest_person(pan_tilt, self._cam_head, duration=45)

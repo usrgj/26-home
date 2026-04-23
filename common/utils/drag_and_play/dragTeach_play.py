@@ -14,7 +14,7 @@ import numpy as np
 import sys
 
 # -------------------------- 核心配置（可通过函数参数覆盖） --------------------------
-DEFAULT_ARM_IP = "192.168.192.19"
+DEFAULT_ARM_IP = "192.168.192.18"
 DEFAULT_ARM_PORT = 8080
 
 # 轨迹平滑配置
@@ -117,42 +117,44 @@ def run_canfd_trajectory(arm, joint_list):
     
     print(f"\n✅ 轨迹透传完成 | 总：{total} | 成功：{success} | 失败：{fail}")
 
-# -------------------------- 对外暴露的核心调用函数 --------------------------
-def play_robot_trajectory(trajectory_file, arm_ip=DEFAULT_ARM_IP, arm_port=DEFAULT_ARM_PORT):
+# 核心函数
+def play_robot_trajectory(trajectory_file, arm_ip=DEFAULT_ARM_IP, arm_port=DEFAULT_ARM_PORT, arm=None):
     """
     【外部调用核心函数】机械臂轨迹复现函数
     :param trajectory_file: 轨迹文件路径（必填）
-    :param arm_ip: 机械臂IP地址（可选，默认：192.168.192.19）
-    :param arm_port: 机械臂端口（可选，默认：8080）
+    :param arm_ip: 机械臂IP地址（可选）
+    :param arm_port: 机械臂端口（可选）
+    :param arm: 已初始化的RoboticArm实例（可选，复用连接）
     :return: bool - 执行成功返回True，失败返回False
     """
     print("="*60)
     print(f"📌 开始执行轨迹复现：{trajectory_file}")
     print("="*60)
     print("⚠️  运行前确认：机械臂已回零、伺服使能、周围无障碍物")
-    input("按回车继续...")
 
-    # 初始化机械臂连接
-    arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)
-    handle = arm.rm_create_robot_arm(arm_ip, arm_port)
-    if handle.id < 0:
-        print("❌ 机械臂连接失败")
-        return False
+    # 复用外部传入的arm实例，否则新建
+    own_arm = arm is None
+    if own_arm:
+        arm = RoboticArm(rm_thread_mode_e.RM_TRIPLE_MODE_E)
+        handle = arm.rm_create_robot_arm(arm_ip, arm_port)
+        if handle.id < 0:
+            print("❌ 机械臂连接失败")
+            return False
 
     try:
-        # 加载并插补轨迹
         joint_list = load_and_interpolate_trajectory(trajectory_file)
-        # 执行轨迹
         run_canfd_trajectory(arm, joint_list)
         return True
     except Exception as e:
         print(f"\n❌ 轨迹复现出错：{str(e)}")
         return False
     finally:
-        # 释放机械臂资源
-        arm.rm_delete_robot_arm()
-        print("\n✅ 机械臂连接已释放")
-
+        # 仅销毁自己创建的arm，外部传入的不销毁
+        if own_arm:
+            arm.rm_delete_robot_arm()
+            print("\n✅ 机械臂连接已释放")
+        else:
+            print("\n✅ 复用的arm连接未释放")
 # -------------------------- 保留命令行运行逻辑 --------------------------
 if __name__ == "__main__":
     # 命令行运行时，支持传入轨迹文件参数

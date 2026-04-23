@@ -6,10 +6,10 @@ import select
 from datetime import datetime  # 新增：用于生成时间戳
 
 # -------------------------- 配置项 --------------------------
-ARM_IP = "192.168.192.19"
+ARM_IP = "192.168.192.18"
 ARM_PORT = 8080
 # 轨迹保存目录（仅目录，不再是固定文件）
-TRAJECTORY_SAVE_DIR = "./trajectory/"
+TRAJECTORY_SAVE_DIR = "/home/blinx/26-home/trajectory/"
 # 拖动灵敏度（0-100，数值越小越沉，建议50-80）
 DRAG_SENSITIVITY = 100
 
