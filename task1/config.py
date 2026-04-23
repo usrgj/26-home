@@ -8,18 +8,18 @@ LLM_VL_SERVER = "http://127.0.0.1:8003/v1"
 # ── 场地站点 ID（对应地图上的点位名称）────────────────────────────────────
 STATION_START = "LM1"          # 机器人起始位置
 STATION_DOOR = "LM2"            # 入口门
-STATION_OBSERVATION = "observation" # 第二个观察座位的站点
+STATION_OBSERVATION = "LM6" # 第二个观察座位的站点
 STATION_SEAT1 = "LM3" # 五个位置，需要3个站点才能全部到达
 STATION_SEAT2 = "LM4"
 STATION_SEAT3 = "LM5"
 
 # ── 座位状态 初始设为未知  ─────────────────────────────────────────────────
 SEATS = [
-    {"id": "seat_1", "occupied": None, "box1": [414, 253, 639, 478], "box2": [0, 0, 0, 0]},  # box1 是在第一个观察位置看到的座位框，box2 是在第二个观察位置看到的座位框，如果某个位置看不到这个座位就设为 [0,0,0,0]
-    {"id": "seat_2", "occupied": None, "box1": [472, 102, 621, 217], "box2": [0, 0, 0, 0]},
-    {"id": "seat_3", "occupied": None, "box1": [5,6,229,221 ], "box2": [0, 0, 0, 0]},
-    {"id": "seat_4", "occupied": None, "box1": [5, 6, 229, 221], "box2": [0, 0, 0, 0]},
-    {"id": "seat_5", "occupied": None, "box1": [11, 209, 347, 409], "box2": [0, 0, 0, 0]},
+    {"id": "seat_1", "occupied": None, "box1": [0, 0, 0, 0], "box2": [190, 10, 297, 153]},  # box1 是在第一个观察位置看到的座位框，box2 是在第二个观察位置看到的座位框，如果某个位置看不到这个座位就设为 [0,0,0,0]
+    {"id": "seat_2", "occupied": None, "box1": [439, 201, 639, 407], "box2": [0, 0, 0,0]},
+    {"id": "seat_3", "occupied": None, "box1": [0, 0, 0, 0], "box2": [53, 160, 261, 324]}, #seat3,"box1": [472, 102, 621, 217]
+    {"id": "seat_4", "occupied": None, "box1": [237, 16, 345, 139], "box2": [437, 41, 583, 321]},
+    {"id": "seat_5", "occupied": None, "box1": [0,0,0, 0], "box2": [324, 1, 416, 155]},
 ]
 PRE_OCCUPIED_SEATS = []
 
@@ -73,9 +73,6 @@ FOLLOW_HOST_TIMEOUT = 90   # 跟随主人阶段超时
 
 
 # ── 机械臂预设 ───────────────────────────────────────────────────────────
-ARM_RECEIVE_BAG = 500000
-ARM_PLACE_BAG = 300000
-ARM_HOME = 0
 LEFT_HOME_JOINTS = [-4.297, -97.695, -22.042, 18.172, -12.501, 0]  # 初始关节角度（度）
 RIGHT_HOME_JOINTS = [30.0, -94.4, -25.7, -60.9, -31.6, 0]  # 初始关节角度（度）
 ARM_SPEED = 40  # 运动速度 1~100

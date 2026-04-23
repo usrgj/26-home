@@ -4,6 +4,7 @@
 from __future__ import annotations
 import os
 import sys
+import math
 
 # 获取当前脚本的绝对路径 (26-home/task3/arm_folding/tool/slide_locate.py)
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -28,7 +29,7 @@ if __name__ == "__main__":
     # agv.send_velocity(0.3, 0.0, duration=0) #开环运动
     # time.sleep(5)
 
-    print(agv.navigate_to("", "LM2"))
+    print(agv.navigate_to("", "LM3", math.radians(18.850)))
     time.sleep(3)
     wait_nav()
 

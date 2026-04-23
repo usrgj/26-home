@@ -5,7 +5,7 @@ class SeatManager:
     """
     统一的座位管理能力接口，支持团队状态机直接import使用。
     """
-    def __init__(self, seat_coords: List[Tuple[int, int, int, int]], min_empty=2, max_overlap=0.3):
+    def __init__(self, seat_coords: List[Tuple[int, int, int, int]], min_empty=0, max_overlap=0.3):
         """
         seat_coords: 所有已知座位的像素坐标[(x1, y1, x2, y2), ...]
         min_empty: 至少空N个座位

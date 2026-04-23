@@ -11,6 +11,7 @@ import os
 import tempfile
 import threading
 import time
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -75,6 +76,7 @@ class ReceiveGuest(State):
             pan_tilt.home()
             agv.navigate_to(agv.get_current_station(), config.STATION_START)
             wait_nav(timeout=config.NAV_TIMEOUT)
+            
             #==== 空座位识别能力接口调用 START ==== author:xxy
             for _ in range(5):
                 color_frame, _ = self._cam_chest.get_frames()
@@ -94,7 +96,7 @@ class ReceiveGuest(State):
                     cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (255,255,0), 2)
                 cv2.imshow('Seat Status', frame)
                 cv2.waitKey(1)
-                time.sleep(0.08)
+                
             seat_status = self.seat_manager.seat_status
             print(f"当前座位状态: {seat_status}")
             empty_indices = [i for i, s in enumerate(seat_status) if s == "empty"]
@@ -116,16 +118,14 @@ class ReceiveGuest(State):
             agv.navigate_to(config.STATION_START, config.STATION_DOOR)
             wait_nav(timeout=config.NAV_TIMEOUT)
 
-            # TODO 开门
-            left_gripper.open()
-            success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_GET_PATH, arm=left_arm)
-            left_gripper.grab(force=700, block=True, timeout=5)
-            success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_MOVE_PATH, arm=left_arm)
-            left_gripper.open(block=True)
-            success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_LEAVE_PATH, arm=left_arm)
-            
-            
-            
+            #开门
+            # left_gripper.open()
+            # success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_GET_PATH, arm=left_arm)
+            # left_gripper.grab(force=700, block=True, timeout=5)
+            # success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_MOVE_PATH, arm=left_arm)
+            # left_gripper.open(block=True)
+            # success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_LEAVE_PATH, arm=left_arm)
+
             
             # 注视 author:xxy
             gaze_thread, gaze_stop_event = self.gaze_api.start_gaze_tracking_nearest_person(pan_tilt, self._cam_head, duration=45)
@@ -153,8 +153,6 @@ class ReceiveGuest(State):
                 gaze_thread.join()
                 pan_tilt.home()#回中
 
-            # 导航到空位置
-            seat_id = ctx.find_free_seat()
             # 如果找不到空座位，则去第二个位置观察，再找一次
             if seat_id is None:
                 agv.navigate_to(agv.get_current_station(), config.STATION_OBSERVATION)
@@ -174,18 +172,19 @@ class ReceiveGuest(State):
                     seat_id = config.SEATS[seat_idx]["id"]
                 else:
                     seat_id = None
+                    
             if seat_id is None:
-                # 默认导航到某个备选点/接待区
-                nav_id, angle = _get_seat_navigation_target("seat_default")
-                agv.navigate_to(agv.get_current_station() or "", nav_id, angle)
-                wait_nav(timeout=config.NAV_TIMEOUT)
+                # # 默认导航到某个备选点/接待区
+                # nav_id, angle = _get_seat_navigation_target("seat_default")
+                # agv.navigate_to(agv.get_current_station() or "", nav_id, angle)
+                # wait_nav(timeout=config.NAV_TIMEOUT)
                 voice_assistant.speak("Sorry, no free seat detected, please wait for staff assistance.")
                         
-            if seat_id is not None:
+            elif seat_id :
                 nav_id, angle = _get_seat_navigation_target(seat_id)
                 voice_assistant.speak("Please follow me, I will show you to your seat.")
                 pan_tilt.home()
-                agv.navigate_to(agv.get_current_station() or "", nav_id, angle)
+                agv.navigate_to(agv.get_current_station() or "", nav_id, math.radians(angle))
                 wait_nav(timeout=config.NAV_TIMEOUT)
                 
                 left_arm.rm_movej([-44.246,-59.463,-58.874,20.883,0.296,12.781], 20, 0, 0, 0)
