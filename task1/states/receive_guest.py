@@ -75,6 +75,10 @@ class ReceiveGuest(State):
             agv.navigate_to(agv.get_current_station(), config.STATION_START)
             wait_nav(timeout=config.NAV_TIMEOUT)
             #==== 空座位识别能力接口调用 START ==== author:xxy
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
             for _ in range(5):
                 color_frame, _ = self._cam_chest.get_frames()
                 if color_frame is None:
