@@ -45,8 +45,8 @@ class ReceiveBag(State):
       time.sleep(3)
 
       left_gripper.grab(force=500)
-      print(left_arm.rm_movej([-23.77,-93.721,-52.2,-19.763,-47.238,19.638], 40, 0, 0, 1))
-      time.sleep(2)
+      print(left_arm.rm_movej([-23.77,-93.721,-52.2,-19.763,-47.238,19.638], 40, 0, 0, 0))
+      # time.sleep(2)
 
       # ctx.bag_received = True
 
