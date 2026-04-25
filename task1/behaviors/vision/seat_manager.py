@@ -5,7 +5,7 @@ class SeatManager:
     """
     统一的座位管理能力接口，支持团队状态机直接import使用。
     """
-    def __init__(self, seat_coords: List[Tuple[int, int, int, int]], min_empty=0, max_overlap=0.3):
+    def __init__(self, seat_coords: List[Tuple[int, int, int, int]], min_empty=1, max_overlap=0.3):
         """
         seat_coords: 所有已知座位的像素坐标[(x1, y1, x2, y2), ...]
         min_empty: 至少空N个座位
@@ -14,7 +14,7 @@ class SeatManager:
         self.seat_coords = seat_coords
         self.min_empty = min_empty
         self.max_overlap = max_overlap
-        self.seat_status = ["unknown"] * len(seat_coords)  # "occupied", "empty"
+        self.seat_status = ["unclear"] * len(seat_coords)  # "occupied", "empty"
         self.frame_memory = []  # 多帧融合投票
 
     def update_from_detections(self, person_boxes: List[Tuple[int, int, int, int]]):
@@ -23,6 +23,9 @@ class SeatManager:
         """
         status = []
         for seat in self.seat_coords:
+            if seat==[0,0,0,0]:
+                status.append("unclear")
+                continue
             max_ov = max((self.calc_iou(seat, p) for p in person_boxes), default=0)
             if max_ov > self.max_overlap:
                 status.append("occupied")
@@ -32,8 +35,6 @@ class SeatManager:
         if len(self.frame_memory) > 3:
             self.frame_memory.pop(0)
         self.seat_status = self.vote_frames(self.frame_memory)
-        if self.seat_status.count("empty") < self.min_empty:
-            self.seat_status = self.apply_deduction(self.seat_status)
 
     def vote_frames(self, memory: List[List[str]]) -> List[str]:
         """多帧投票决定状态"""
