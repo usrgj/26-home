@@ -25,12 +25,45 @@ if __name__ == "__main__":
 
 
     agv.start()
+    
+    w = 0.0
+    
+    for i in range(13):
+        agv.send_velocity(0.0, 0.0, w, duration=0)
+        print(f"速度: {w:.2f} rad/s")
+        time.sleep(0.1)
+        w += 0.15
 
-    # agv.send_velocity(0.3, 0.0, duration=0) #开环运动
-    # time.sleep(5)
+    time.sleep(2)
+        
+    for i in range(13):
+        w -= 0.15
+        agv.send_velocity(0.0, 0.0, w, duration=0)
+        print(f"速度: {w:.2f} rad/s")
+        time.sleep(0.1)
+        
+    speed = 0.0
+    
+    for i in range(13):
+        agv.send_velocity(speed, 0.0, duration=0)
+        print(f"速度: {speed:.2f} m/s")
+        time.sleep(0.1)
+        speed += 0.07
 
-    print(agv.navigate_to("", "LM3", math.radians(18.850)))
-    time.sleep(3)
-    wait_nav()
+    time.sleep(2)
+        
+    for i in range(13):
+        agv.send_velocity(speed, 0.0, duration=0)
+        print(f"速度: {speed:.2f} m/s")
+        time.sleep(0.1)
+        speed -= 0.07
+        
+
+
+    # # print(agv.navigate_to("", "LM1"))
+    # print(agv.free_navigate_to(0, 0, 0))
+    # print(agv.get_alarm())
+    # time.sleep(3)
+    # wait_nav()
 
     agv.stop()

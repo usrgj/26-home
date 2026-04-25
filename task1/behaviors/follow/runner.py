@@ -222,13 +222,32 @@ class FollowRunner:
 
             lidar_candidates = []
             obstacle_sectors = np.full(72, 40.0)
+            
+            # 处理上一帧目标在机器人坐标系的位置，后续在vfh中用到 
+            target_mask_local = None
+            prev_target = self._last_target_state
+            if prev_target.is_valid and not prev_target.is_coasting:
+                tx, ty = self._robot_api.world_to_robot(
+                    prev_target.x,
+                    prev_target.y,
+                    robot_pose,
+                )
+                target_dist = math.hypot(tx, ty)
+                if tx > 0.0 and 0.3 < target_dist < 2.0:
+                    target_mask_local = (tx, ty)
+
 
             try:
                 # LiDAR 同时承担两件事：提供人物候选，以及提供避障扇区。
                 scans = self._robot_api.get_lidar_scans()
                 if scans:
                     lidar_candidates = self._lidar_proc.process(scans, robot_pose)
-                    obstacle_sectors = self._lidar_proc.get_obstacle_sectors(scans)
+                    obstacle_sectors = self._lidar_proc.get_obstacle_sectors(
+                                        scans,
+                                        target_local_pos=target_mask_local,
+                                        target_mask_radius=0.28,
+                                    )
+
                 else :
                     print("get lidar scans error")
             except NotImplementedError:
@@ -302,6 +321,7 @@ class FollowRunner:
                     robot_pose,
                     obstacle_sectors,
                 )
+                # print(cmd_linear, cmd_angular) # DEGUG
 
             current_state = self._state_machine.update(
                 target_state,
@@ -336,6 +356,7 @@ class FollowRunner:
                 pass
 
             if self._loop_count % self._status_log_interval == 0:
+                # 日志输出
                 status = self._state_machine.get_status_str()
                 if target_state.is_valid:
                     dist = math.hypot(
@@ -466,3 +487,7 @@ class FollowRunner:
             lidar_candidate_count=lidar_count,
         )
         return self._last_result
+
+
+
+

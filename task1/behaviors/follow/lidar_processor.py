@@ -165,8 +165,12 @@ class LidarProcessor:
         
         return candidates
     
-    def get_obstacle_sectors(self, scans: List[LidarScan],
-                             num_sectors: int = 72) -> np.ndarray:
+    def get_obstacle_sectors(self, 
+                             scans: List[LidarScan],
+                             num_sectors: int = 72,
+                             target_local_pos: Optional[Tuple[float, float]] = None,
+                             target_mask_radius: float = 0.28
+                            ) -> np.ndarray:
         """
         将360°范围划分为若干扇区，返回每个扇区内的最近障碍物距离。
         用于反应式避障 (VFH 向量场直方图)。
@@ -174,6 +178,9 @@ class LidarProcessor:
         参数:
             scans: LiDAR扫描数据
             num_sectors: 扇区数量 (默认72个，每个5°)
+            target_local_pos: 目标位置 (机器人坐标系)
+            target_mask_radius: 目标半径 (m)
+            后两个参数用于过滤目标
         
         返回:
             numpy数组 (num_sectors,)，每个扇区最近的障碍物距离 (m)
@@ -183,8 +190,14 @@ class LidarProcessor:
         min_dists = np.full(num_sectors, LIDAR_MAX_RANGE)
         
         all_points = self._merge_scans(scans)
-        
+
         for px, py in all_points:
+            # 过滤目标
+            if target_local_pos is not None:
+                tx, ty = target_local_pos
+                if math.hypot(px - tx, py - ty) < target_mask_radius:
+                    continue
+                
             # 计算该点相对于机器人中心的角度和距离
             angle = math.degrees(math.atan2(py, px))  # -180 ~ 180
             if angle < 0:

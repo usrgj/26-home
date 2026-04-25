@@ -28,6 +28,7 @@ from common.skills.audio_module.voice_assiant import (
     extract_name,
     voice_assistant,
 )
+from common.skills.slide_control import slide_control
 from common.skills.camera import camera_manager
 from common.skills.head_control import pan_tilt
 from common.state_machine import State
@@ -114,15 +115,17 @@ class ReceiveGuest(State):
 
             # 导航到门口
             agv.navigate_to(config.STATION_START, config.STATION_DOOR)
+            slide_control.send_axis(-2000000)
             wait_nav(timeout=config.NAV_TIMEOUT)
 
             #开门
-            # left_gripper.open()
-            # success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_GET_PATH, arm=left_arm)
-            # left_gripper.grab(force=700, block=True, timeout=5)
-            # success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_MOVE_PATH, arm=left_arm)
-            # left_gripper.open(block=True)
-            # success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_LEAVE_PATH, arm=left_arm)
+            left_gripper.open()
+            success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_GET_PATH, arm=left_arm)
+            left_gripper.grab(force=700, block=True, timeout=5)
+            success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_MOVE_PATH, arm=left_arm)
+            left_gripper.open(block=True)
+            success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_LEAVE_PATH, arm=left_arm)
+            left_arm.rm_movej(config.LEFT_HOME_JOINTS, 20, 0, 0, 0)
 
             
             # 注视 author:xxy
@@ -160,6 +163,7 @@ class ReceiveGuest(State):
             else:
                 # 观察点1 无空座 → 才去 观察点2 检测
                 agv.navigate_to(agv.get_current_station(), config.STATION_OBSERVATION)
+                slide_control.send_axis(0000000, block=True)
                 wait_nav(timeout=config.NAV_TIMEOUT)
                 for _ in range(5):
                     color_frame, _ = self._cam_head.get_frames()

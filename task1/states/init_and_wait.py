@@ -26,6 +26,7 @@ class InitAndWait(State):
 # ═══════════════════════════════════════════════════════════════════════════
         # 导轨回中（在运行前需要检查使能并清除故障）
         slide_control.send_axis(0000000)
+        slide_control.device_speed_set(400)
 
         # 建立底盘通讯(需要释放)
         agv.start()

@@ -131,6 +131,13 @@ class AGVApi:
         则这个字段为空字符。查询当前所在站点""" 
         data = self._query_data(_STATUS, "03EC")
         return data.get("current_station") if data else ""
+    
+    def get_alarm(self) -> dict | None:
+        """
+        查询当前机器人的报警信息
+        https://seer-group.feishu.cn/wiki/WrZFwfzDKinuVFkKrsxcbBVhnSg?from=space_search
+        """
+        return self._query_data(_STATUS, "041A")
 
     # ═════════════════════════════════════════════════════════════════════
     #  运动控制

@@ -10,7 +10,7 @@ import math
 # 机器人物理参数 
 # =============================================================================
 ROBOT_RADIUS = 0.5448                # 机器人外接圆半径 (m)，用于避障安全距离计算
-ROBOT_MAX_LINEAR_VEL = 0.6         # 最大线速度 (m/s)，室内跟随建议 0.4~0.8
+ROBOT_MAX_LINEAR_VEL = 0.8         # 最大线速度 (m/s)，室内跟随建议 0.4~0.8
 ROBOT_MAX_ANGULAR_VEL = 0.8        # 最大角速度 (rad/s)
 MAX_LINEAR_ACCEL = 0.4            # 最大线加速度 (m/s²)，限制每周期速度变化
 MAX_ANGULAR_ACCEL = 1.0            # 最大角加速度 (rad/s²)
@@ -98,7 +98,7 @@ FOLLOW_DISTANCE_TOLERANCE = 0.4    # 距离容差 (m)
 FOLLOW_ANGLE_TOLERANCE = 0.3      # 角度容差 (rad)，约10°
 
 # PID 线速度控制器
-PID_LINEAR_KP = 0.8
+PID_LINEAR_KP = 0.4
 PID_LINEAR_KI = 0.0
 PID_LINEAR_KD = 0.1
 
@@ -108,8 +108,8 @@ PID_ANGULAR_KI = 0.0
 PID_ANGULAR_KD = 0.2
 
 # 加速度控制
-MAX_LINEAR_DELTA = MAX_LINEAR_ACCEL /  6  # 每周期最大线速度变化 (m/s)
-MAX_ANGULAR_DELTA = MAX_ANGULAR_ACCEL / 6  # 每周期最大角速度变化 (rad/s)
+MAX_LINEAR_DELTA = 0.07  # 每周期最大线速度变化 (m/s)
+MAX_ANGULAR_DELTA = 0.15  # 每周期最大角速度变化 (rad/s)
 
 # =============================================================================
 # 避障参数

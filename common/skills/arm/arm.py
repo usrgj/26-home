@@ -3,7 +3,7 @@
 '''
 from Robotic_Arm.rm_robot_interface import *
 
-LEFT_ARM_IP = "192.168.192.18"
+LEFT_ARM_IP = "192.168.192.19"
 # RIGHT_ARM_IP = "192.168.192.19"
 ARM_PORT = 8080
 

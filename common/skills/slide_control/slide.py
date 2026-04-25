@@ -650,17 +650,21 @@ class ModbusRTUMonitor:
         }
         return mode_map.get(mode, f"未知模式 ({mode})")
     
-    def send_axis(self, abs_axis):
+    def send_axis(self, abs_axis, block : bool = False):
         '''
         发送绝对坐标
         '''
         self.device_location_set(abs_axis)
-        time.sleep(0.5)
+        # time.sleep(0.5)
         # 启动控制
         self.device_start("2F")
-        time.sleep(0.5)
+        # time.sleep(0.5)
         self.device_start("3F")
-        print("等待运动完成...")
+        
+        if not block:
+            return
+        
+        print("等待导轨运动完成...")
         for i in range(60):  # 最多等待30秒
             time.sleep(0.5)
             sw = self.read_status_word()
