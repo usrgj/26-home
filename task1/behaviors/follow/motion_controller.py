@@ -193,6 +193,9 @@ class MotionController:
         # 如果目标在后方 (|angle_error| > 90°)，先转身再前进
         if abs(angle_error) > math.pi / 2:
             linear_vel = 0.0  # 先不前进，只转身
+        elif abs(angle_error) > math.pi / 3:
+            # 否则，根据距离误差调整线速度
+            linear_vel *= 1 / abs(angle_error)
 
         # 距离太近时后退
         if dist_to_target < FOLLOW_DISTANCE - FOLLOW_DISTANCE_TOLERANCE:
@@ -205,18 +208,22 @@ class MotionController:
         angle_tollerance = min(angle_tollerance, 0.55)
 
         # --- Step 6: PID计算角速度 ---
-        if abs(dist_error) < FOLLOW_DISTANCE_TOLERANCE + 0.2 and target.speed < 0.3 and abs(angle_error) < math.radians(20) and abs(local_y) < 0.25:
+        if abs(dist_error) < FOLLOW_DISTANCE_TOLERANCE  and target.speed < 0.3 and abs(angle_error) < math.radians(20) and abs(local_y) < 0.2:
             # 已经非常接近，而且目标速度很慢，变成弱控制
-            if abs(local_y) < 0.12:
+            if abs(local_y) < 0.08:
                 # 横向距离足够小，停止转向
                 angular_vel = 0.0
                 self.is_freezed = True
             else:
-                angular_vel = 0.5 * self._angular_pid.compute(angle_error, now)
+                angular_vel = self._angular_pid.compute(angle_error, now) * abs(angle_error) * 2.3
                 
-        elif abs(safe_angle) < angle_tollerance:
+        elif abs(safe_angle) < angle_tollerance / 4:
             # 角度死区：角度偏差在容差范围内时不转
             angular_vel = 0.0
+            
+        elif abs(safe_angle) < angle_tollerance:
+            # 角度偏差在容差范围内时，使用VFH结果作为目标角度
+            angular_vel = self._angular_pid.compute(safe_angle, now) * abs(angle_error) * 1.2
         else:
             angular_vel = self._angular_pid.compute(safe_angle, now)
         
@@ -244,8 +251,11 @@ class MotionController:
 
         self._last_linear_vel = linear_vel
         self._last_angular_vel = angular_vel
+        # print(f"角度误差: {angle_error:.2f}°,距离误差: {dist_error:.2f}m，距离：{dist_to_target:.2f}m") #DEBUG
+        
 
-        return (linear_vel * 0.5, 0.0) if self.is_freezed else (linear_vel, angular_vel)
+        # return (linear_vel * 0.5, 0.0) if self.is_freezed else (linear_vel, angular_vel)
+        return linear_vel, 0.0 if self.is_freezed else angular_vel
 
     def rotate_search(self, direction: float = 1.0) -> Tuple[float, float]:
         """

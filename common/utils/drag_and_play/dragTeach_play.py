@@ -80,20 +80,18 @@ def load_and_interpolate_trajectory(file_path):
 # -------------------------- 轨迹执行（内部辅助函数） --------------------------
 def run_canfd_trajectory(arm, joint_list):
     """执行CANFD轨迹复现（内部函数，无需外部调用）"""
-    print("\n▶️  开始CANFD透传轨迹复现...")
-    
     # 1. 运动到轨迹起点
     first_joint = joint_list[0]
-    print(f"1. 运动到轨迹起点")
+    # print(f"1. 运动到轨迹起点")
     arm.rm_movej(first_joint, 20, 0, 0, 1)
-    time.sleep(1.5)
+    # time.sleep(1.5)
     
     # 2. 高频透传执行轨迹
-    print(f"2. 开始透传执行轨迹...")
+    # print(f"2. 开始透传执行轨迹...")
     total = len(joint_list)
     success = 0
     fail = 0
-    interval = SEND_INTERVAL_MS / 1000
+    interval = SEND_INTERVAL_MS / 2000
 
     for idx, joint in enumerate(joint_list):
         ret = arm.rm_movej_canfd(
@@ -106,12 +104,11 @@ def run_canfd_trajectory(arm, joint_list):
         
         if ret == 0:
             success += 1
+            print("\r✅ 第{idx+1}点成功", end="")
         else:
             fail += 1
             print(f"⚠️  第{idx+1}点失败：{ret}")
-        
-        if (idx + 1) % 50 == 0:
-            print(f"   进度：{idx+1}/{total} | 成功：{success}")
+
         
         time.sleep(interval)
     
