@@ -26,11 +26,21 @@ class SeatManager:
             if seat==[0,0,0,0]:
                 status.append("unclear")
                 continue
-            max_ov = max((self.calc_iou(seat, p) for p in person_boxes), default=0)
-            if max_ov > self.max_overlap:
-                status.append("occupied")
-            else:
-                status.append("empty")
+            occupied = False
+            for p in person_boxes:
+                # 计算交集面积
+                xA = max(seat[0], p[0])
+                yA = max(seat[1], p[1])
+                xB = min(seat[2], p[2])
+                yB = min(seat[3], p[3])
+                interArea = max(0, xB - xA) * max(0, yB - yA)
+                seat_area = max(1, (seat[2] - seat[0]) * (seat[3] - seat[1]))
+                person_area = max(1, (p[2] - p[0]) * (p[3] - p[1]))
+                # 阈值建议0.3~0.4
+                if (interArea / seat_area > 0.3) or (interArea / person_area > 0.3):
+                    occupied = True
+                    break
+            status.append("occupied" if occupied else "empty")
         self.frame_memory.append(status)
         if len(self.frame_memory) > 3:
             self.frame_memory.pop(0)

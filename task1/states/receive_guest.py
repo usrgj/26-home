@@ -153,7 +153,7 @@ class ReceiveGuest(State):
                 agv.navigate_to(agv.get_current_station(), config.STATION_OBSERVATION)
                 wait_nav(timeout=config.NAV_TIMEOUT)
                 for _ in range(5):
-                    color_frame, _ = self._cam_head.get_frames()
+                    color_frame, _ = self._cam_chest.get_frames()
                     if color_frame is None:
                         continue
                     person_boxes = self.gaze_api.detect_persons(color_frame)
@@ -208,7 +208,21 @@ class ReceiveGuest(State):
             self._model = YOLO("yolov8n.pt")
         return self._model
 
+def quest_and_answer(text: str) -> str:
+    """进行一次询问，和一次识别回答结果
+    text: 询问内容
+    return: 识别结果
+    """
 
+    for i in range(config.ASK_RETRIES):
+        voice_assistant.speak(text)
+        recognized_text = _record_and_recognize_text()
+        print(f"识别到回答：{recognized_text}")
+
+        if recognized_text:
+            return recognized_text
+
+    return ""
 
 
 
