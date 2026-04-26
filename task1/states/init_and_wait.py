@@ -25,8 +25,11 @@ class InitAndWait(State):
 
 # ═══════════════════════════════════════════════════════════════════════════
         # 导轨回中（在运行前需要检查使能并清除故障）
-        slide_control.send_axis(0000000)
+        # slide_control.clear_fault()
+        # slide_control.switch_to_position_mode()
         slide_control.device_speed_set(400)
+        slide_control.send_axis(0000000)
+        
 
         # 建立底盘通讯(需要释放)
         agv.start()
@@ -50,6 +53,6 @@ class InitAndWait(State):
 
         input("[状态0] 硬件就绪，按 Enter 开始比赛...")
 
-        time.sleep(2)
+        # time.sleep(2)
 
         return "receive_guest"

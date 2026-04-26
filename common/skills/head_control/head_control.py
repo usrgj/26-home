@@ -18,6 +18,7 @@
 - `clear_fault()`
 - `move_absolute(...)`
 - `move_relative(...)`
+- `set_current_position_as_zero(...)`
 
 兼容接口：
 - `rotate_horizontal/rotate_vertical`
@@ -233,8 +234,36 @@ class HeadCameraController:
         self.move_relative(horizontal=horizontal, vertical=vertical, speed=speed, acceleration=acceleration)
 
     def home(self, speed: int = DEFAULT_SPEED, acceleration: int = DEFAULT_ACCELERATION) -> None:
-        """回到逻辑零点；前提是该零点已通过面板或 0x91/0x92 建立。"""
+        """回到逻辑零点；前提是该零点已通过面板或 set_current_position_as_zero 建立。"""
         self.move_absolute(horizontal=0, vertical=0, speed=speed, acceleration=acceleration)
+
+    def set_current_position_as_zero(self, horizontal: bool = True, vertical: bool = True) -> bool:
+        """
+        将当前云台位置设置为电机逻辑零点。
+
+        参数:
+            horizontal: 是否设置水平轴（地址 0x01）的当前位置为 0
+            vertical: 是否设置垂直轴（地址 0x02）的当前位置为 0
+
+        返回:
+            所有被选中的轴都设置成功则返回 True，否则返回 False。
+
+        说明:
+            该接口对应 MKS 串口协议 0x92“直接归零指令”，只修改驱动板
+            当前坐标零点，不主动驱动电机运动。设置完成后，home() 会回到
+            新建立的逻辑零点。
+        """
+        ok = True
+        for addr, enabled in self._selected_axes(horizontal, vertical):
+            if not enabled:
+                continue
+            status = self._command_status(addr, 0x92)
+            ok = ok and (status == 0x01)
+        return ok
+
+    def set_zero(self, horizontal: bool = True, vertical: bool = True) -> bool:
+        """兼容短名称：将当前云台位置设置为电机逻辑零点。"""
+        return self.set_current_position_as_zero(horizontal=horizontal, vertical=vertical)
 
     def get_position(self) -> tuple[int, int]:
         return self._read_coordinate(ADDR_HORIZONTAL), self._read_coordinate(ADDR_VERTICAL)
