@@ -6,28 +6,36 @@ import os
 import hashlib
 import shutil
 import glob
+import re
 from datetime import datetime
 import sys
 from pathlib import Path
 
-# 将项目根目录添加到 sys.path，以便导入 common.config
-PROJECT_ROOT = Path(__file__).resolve().parents[3]  # 向上4级到 26-home
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
-
 from common.config import LANGUAGE
+
+# 安全文件名函数（必须与客户端完全一致）
+def safe_filename(text: str, max_len=100) -> str:
+    illegal_chars = r'[\\/*?:"<>|]'
+    safe = re.sub(illegal_chars, '_', text)
+    safe = safe.strip('. ')
+    if len(safe) > max_len:
+        safe = safe[:max_len]
+    return safe + ".mp3"
 
 app = FastAPI()
 
-# 根据全局配置选择默认语音
 if LANGUAGE == "en":
-    VOICE_DEFAULT = "en-US-JennyNeural"   # 英文女声
+    VOICE_DEFAULT = "en-US-JennyNeural"
 else:
-    VOICE_DEFAULT = "zh-CN-XiaoxiaoNeural" # 中文女声
+    VOICE_DEFAULT = "zh-CN-XiaoxiaoNeural"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUDIO_DIR = os.path.join(BASE_DIR, "audio_cache")
-CACHE_DIR = AUDIO_DIR   # 统一使用 audio_cache 目录
+CACHE_SUBDIR = os.path.join(AUDIO_DIR, "cache")
 os.makedirs(AUDIO_DIR, exist_ok=True)
+os.makedirs(CACHE_SUBDIR, exist_ok=True)
 
 def speed_to_rate(speed):
     percent = int((speed - 1.0) * 100)
@@ -40,32 +48,41 @@ async def speech(
     voice: str = Body(VOICE_DEFAULT, embed=True),
     speed: float = Body(1.0, embed=True)
 ):
-    # 生成缓存 key（包含语言信息）
-    key = hashlib.md5(f"{input}_{speed}_{voice}".encode()).hexdigest()
-    cache_path = os.path.join(CACHE_DIR, f"{key}.mp3")
+    # 主缓存路径（与客户端一致）
+    cache_filename = safe_filename(input)
+    cache_path = os.path.join(AUDIO_DIR, cache_filename)
+
+    # 如果主缓存已存在，直接返回
     if os.path.exists(cache_path):
         return Response(content=open(cache_path, "rb").read(), media_type="audio/mpeg")
 
-    # 使用传入的 voice 参数（若未传则用默认语音）
+    # 生成原始备份文件名（时间戳+哈希，仅作备份）
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    text_hash = hashlib.md5(input.encode()).hexdigest()[:8]
+    backup_filename = f"{timestamp}_{text_hash}.mp3"
+    backup_path = os.path.join(CACHE_SUBDIR, backup_filename)
+
+    # 调用 edge_tts 生成音频到备份路径
     communicate = edge_tts.Communicate(input, voice, rate=speed_to_rate(speed))
-    audio_path = os.path.join(AUDIO_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp3")
     try:
-        await communicate.save(audio_path)
+        await communicate.save(backup_path)
     except Exception as e:
         return Response(content=f"TTS failed: {e}", status_code=500)
-    
-    # 复制到缓存（现在 cache_path 也在同一个 audio_cache 目录）
-    shutil.copy2(audio_path, cache_path)
-    # 可选：清理旧文件（保留最近200个）
-    files = glob.glob(os.path.join(AUDIO_DIR, "*.mp3"))
-    if len(files) > 200:
-        files.sort(key=os.path.getmtime)
-        for f in files[:-200]:
-            os.remove(f)
-    # 注意：CACHE_DIR 和 AUDIO_DIR 相同，不需要重复清理，否则会重复删除
-    # 但为了避免重复，可以只清理一次；上面的清理已经包含所有 mp3 文件
-    
-    return Response(content=open(audio_path, "rb").read(), media_type="audio/mpeg")
+
+    # 复制到主缓存路径
+    shutil.copy2(backup_path, cache_path)
+
+    # 清理旧备份（保留最近200个）
+    try:
+        backups = glob.glob(os.path.join(CACHE_SUBDIR, "*.mp3"))
+        if len(backups) > 200:
+            backups.sort(key=os.path.getmtime)
+            for f in backups[:-200]:
+                os.remove(f)
+    except:
+        pass
+
+    return Response(content=open(cache_path, "rb").read(), media_type="audio/mpeg")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8002)
