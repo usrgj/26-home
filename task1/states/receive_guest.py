@@ -63,7 +63,6 @@ class ReceiveGuest(State):
         seat_coords2 = [seat["box2"] for seat in config.SEATS]
         self.seat_manager_1 = SeatManager(seat_coords1, min_empty=1)
         self.seat_manager_2 = SeatManager(seat_coords2, min_empty=1)
-        self.gaze_api = GazeAPI('yolov8n.pt')
         self.final_empty_indices = []
 
     def execute(self, ctx) -> str:
@@ -77,6 +76,7 @@ class ReceiveGuest(State):
         while ctx.current_guest_index < len(ctx.guests):
             guest_index = ctx.current_guest_index
             guest = ctx.current_guest
+            seat_id = ctx.find_free_seat()
 
             pan_tilt.home()
             agv.navigate_to(agv.get_current_station(), config.STATION_START)
@@ -85,54 +85,71 @@ class ReceiveGuest(State):
             # ==============================================
             # 【回到观察点1 → 立即检测座位】
             # ==============================================
-            for _ in range(5):
-                color_frame, _ = self._cam_chest.get_frames()
-                if color_frame is None:
-                    continue
-                person_boxes = self.gaze_api.detect_persons(color_frame)
-                self.seat_manager_1.update_from_detections(person_boxes)
-                frame = color_frame.copy()
-                for idx, seat in enumerate(self.seat_manager_1.seat_coords):
-                    color = (0,255,0) if self.seat_manager_1.seat_status[idx] == "empty" else (0,0,255)
-                    cv2.rectangle(frame, (seat[0], seat[1]), (seat[2], seat[3]), color, 2)
-                    cv2.putText(frame, f"{idx+1}:{self.seat_manager_1.seat_status[idx]}", (seat[0], seat[1]-10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-                for box in person_boxes:
-                    cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (255,255,0), 2)
-                cv2.imshow('Seat Status', frame)
-                cv2.waitKey(1)
-                time.sleep(0.08)
-            seat_status1 = self.seat_manager_1.seat_status.copy()
-            empty_indices1 = [i for i, s in enumerate(seat_status1) if s == "empty"]
-            print("【观察点1 座位状态】", seat_status1)
-            print("【观察点1 空座位编号】", empty_indices1)
 
-            # 等待门铃
-            doorbell.start()
-            is_detected = doorbell.wait_for_doorbell(timeout=30)
-            doorbell.stop()
-            print("检测到门铃" if is_detected else "等待门铃超时")
+            if ctx.seats[1]["occupied"] is None and ctx.seats[3]["occupied"] is None:
+                for _ in range(5):
+                    color_frame, _ = self._cam_chest.get_frames()
+                    if color_frame is None:
+                        continue
+                    person_boxes = self.gaze_api.detect_persons(color_frame)
+                    self.seat_manager_1.update_from_detections(person_boxes)
+                    frame = color_frame.copy()
+                    for idx, seat in enumerate(self.seat_manager_1.seat_coords):
+                        color = (0,255,0) if self.seat_manager_1.seat_status[idx] == "empty" else (0,0,255)
+                        cv2.rectangle(frame, (seat[0], seat[1]), (seat[2], seat[3]), color, 2)
+                        cv2.putText(frame, f"{idx+1}:{self.seat_manager_1.seat_status[idx]}", (seat[0], seat[1]-10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                    for box in person_boxes:
+                        cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (255,255,0), 2)
+                    cv2.imshow('Seat Status', frame)
+                    cv2.waitKey(1)
+                    time.sleep(0.08)
+                seat_status1 = self.seat_manager_1.seat_status.copy()
+                empty_indices1 = [i for i, s in enumerate(seat_status1) if s == "empty"]
+                print("【观察点1 座位状态】", seat_status1)
+                print("【观察点1 空座位编号】", empty_indices1)
+                
+                for i, s in enumerate(seat_status1):
+                    status = s
+                    print(i, s)
+                    if status == "empty":
+                        ctx.release_seat(ctx.seats[i].get("id"))
+                    elif status == "occupied":
+                        ctx.occupy_seat(ctx.seats[i].get("id"))
+                    # elif status == "unclear":
+                    #     ctx.release_seat(ctx.seats[i].get("id"))
+                    
+            seat_id = ctx.find_free_seat() 
+            print(ctx.seats)
+            print(seat_id)
+                        
 
-            # 导航到门口
-            agv.navigate_to(config.STATION_START, config.STATION_DOOR)
-            slide_control.send_axis(-2000000)
-            wait_nav(timeout=config.NAV_TIMEOUT)
+            # 等待门铃 TO OPEN
+            # doorbell.start()
+            # is_detected = doorbell.wait_for_doorbell(timeout=30)
+            # doorbell.stop()
+            # print("检测到门铃" if is_detected else "等待门铃超时")
 
-            #开门
-            left_gripper.open()
-            success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_GET_PATH, arm=left_arm)
-            left_gripper.grab(force=700, block=True, timeout=5)
-            success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_MOVE_PATH, arm=left_arm)
-            left_gripper.open(block=True)
-            success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_LEAVE_PATH, arm=left_arm)
-            left_arm.rm_movej(config.LEFT_HOME_JOINTS, 20, 0, 0, 0)
+            # 导航到门口 TO OPEN
+            # agv.navigate_to(config.STATION_START, config.STATION_DOOR)
+            # slide_control.send_axis(-2000000, block=True)
+            # wait_nav(timeout=config.NAV_TIMEOUT)
+
+            #开门 TO OPEN
+            # left_gripper.open()
+            # success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_GET_PATH, arm=left_arm)
+            # left_gripper.grab(force=700, block=True)
+            # success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_MOVE_PATH, arm=left_arm)
+            # left_gripper.open(block=True)
+            # success = play_robot_trajectory(trajectory_file=config.TRAJECTORY_LEAVE_PATH, arm=left_arm)
+            # left_arm.rm_movej(config.LEFT_HOME_JOINTS, 30, 0, 0, 0)
 
             
             # 注视 author:xxy
-            gaze_thread, gaze_stop_event = self.gaze_api.start_gaze_tracking_nearest_person(pan_tilt, self._cam_head, duration=45)
+            gaze_thread, gaze_stop_event = self.gaze_api.start_gaze_tracking_nearest_person(pan_tilt, self._cam_head, duration=60)
             # 询问姓名和喜爱饮品，同时在后台提取视觉特征
             try:
-                text = quest_and_answer("Welcome! May I know your name ?")
+                text = quest_and_answer("Welcome! May I have your name, please?")
                 guest.name = extract_name(text)
                 print(f"the guest's name is {guest.name}")
 
@@ -151,22 +168,18 @@ class ReceiveGuest(State):
                 gaze_stop_event.set()
                 gaze_thread.join()
                 pan_tilt.home()
-
-            seat_id = None   #座位还未分配
+                
+            agv.navigate_to("", agv.get_current_station(), angle=math.radians(120))
+            voice_assistant.speak("Please follow me, and I'll get you a seat.")
+              
             # 优先使用观察点1的空座位
-            if empty_indices1:
-                seat_idx = empty_indices1[0]
-                seat_id = config.SEATS[seat_idx]["id"]
-                ctx.occupy_seat(seat_id)
-                guest.seat_id = seat_id
-                print(f"分配座位（观察点1）：seat_id = {seat_id}, 下标 = {seat_idx}")
-            else:
-                # 观察点1 无空座 → 才去 观察点2 检测
+            if seat_id is  None:
+                # 观察点1 无空座  才去 观察点2 检测
                 agv.navigate_to(agv.get_current_station(), config.STATION_OBSERVATION)
                 slide_control.send_axis(0000000, block=True)
                 wait_nav(timeout=config.NAV_TIMEOUT)
                 for _ in range(5):
-                    color_frame, _ = self._cam_head.get_frames()
+                    color_frame, _ = self._cam_chest.get_frames()
                     if color_frame is None:
                         continue
                     person_boxes = self.gaze_api.detect_persons(color_frame)
@@ -186,26 +199,41 @@ class ReceiveGuest(State):
                 empty_indices2 = [i for i, s in enumerate(seat_status2) if s == "empty"]
                 print("【观察点2 座位状态】", seat_status2)
                 print("【观察点2 空座位编号】", empty_indices2)
-                if empty_indices2:
-                    seat_idx = empty_indices2[0]
-                    seat_id = config.SEATS[seat_idx]["id"]
-                    ctx.occupy_seat(seat_id)
-                    guest.seat_id = seat_id
-                    print(f"分配座位（观察点2）：seat_id = {seat_id}, 下标 = {seat_idx}")
+                
+                for i, s in enumerate(seat_status2):
+                    if ctx.seats[i]["occupied"] is not None:
+                        print(f"{i} {ctx.seats[i]['occupied']}") # DEBUG
+                        continue
+                    status = s
+                    print(i, s) #DEBUG
+                    if status == "empty":
+                        ctx.release_seat(ctx.seats[i].get("id"))
+                    elif status == "occupied":
+                        ctx.occupy_seat(ctx.seats[i].get("id"))
+                    # elif status == "unclear":
+                    #     ctx.release_seat(ctx.seats[i].get("id"))
+                
+                print(ctx.seats) # DEBUG
+                seat_id = ctx.find_free_seat()
+                    
             # 导航与引导就坐
-            if seat_id is not None:
+            if seat_id :
+                
+                ctx.guests[guest_index].seat_id = seat_id
+                ctx.occupy_seat(seat_id)
+                
                 nav_id, angle = _get_seat_navigation_target(seat_id)
-                voice_assistant.speak("Please follow me, I will show you to your seat.")
                 pan_tilt.home()
                 agv.navigate_to(agv.get_current_station() or "", nav_id, math.radians(angle))
+                slide_control.send_axis(0000000, block=True)
                 wait_nav(timeout=config.NAV_TIMEOUT)
                 left_arm.rm_movej([-44.246, -59.463, -58.874, 20.883, 0.296, 12.781], 20, 0, 0, 0)
                 voice_assistant.speak("Please have a seat here.")
             else:
-                nav_id, angle = _get_seat_navigation_target("seat_default")
-                agv.navigate_to(agv.get_current_station() or "", nav_id, angle)
-                wait_nav(timeout=config.NAV_TIMEOUT)
-                voice_assistant.speak("Sorry, no free seat detected, please wait for staff assistance.")
+                # nav_id, angle = _get_seat_navigation_target("seat_default")
+                # agv.navigate_to(agv.get_current_station() or "", nav_id, angle)
+                # wait_nav(timeout=config.NAV_TIMEOUT)
+                voice_assistant.speak("Sorry, there are no free seats right now. Please bear with me for a moment.")
             left_arm.rm_movej(config.LEFT_HOME_JOINTS, 20, 0, 0, 0)
             ctx.current_guest_index += 1
 
@@ -224,7 +252,21 @@ class ReceiveGuest(State):
         return self._model
 
 
+def quest_and_answer(text: str) -> str:
+    """进行一次询问，和一次识别回答结果
+    text: 询问内容
+    return: 识别结果
+    """
 
+    for i in range(config.ASK_RETRIES):
+        voice_assistant.speak(text)
+        recognized_text = _record_and_recognize_text()
+        print(f"识别到回答：{recognized_text}")
+
+        if recognized_text:
+            return recognized_text
+
+    return ""
 
 
 def _record_and_recognize_text() -> str:
@@ -368,27 +410,25 @@ def _detect_person_boxes(
     person_class_id: int,
 ) -> list[tuple[int, int, int, int]]:
     """从 YOLO 结果中提取 person 框。"""
-    results = yolo_model(frame, conf=conf, verbose=False)
-    if not results:
-        return []
+    
+    for result in yolo_model(frame, conf=conf, classes=person_class_id, verbose=False, stream=True):
+        if result.boxes is None or len(result.boxes) == 0:
+            return []
 
-    result = results[0]
-    if result.boxes is None or len(result.boxes) == 0:
-        return []
+        boxes: list[tuple[int, int, int, int]] = []
+        for box, cls_id, score in zip(result.boxes.xyxy, result.boxes.cls, result.boxes.conf):
+            if int(cls_id.item()) != person_class_id:
+                continue
+            if float(score.item()) < conf:
+                continue
 
-    boxes: list[tuple[int, int, int, int]] = []
-    for box, cls_id, score in zip(result.boxes.xyxy, result.boxes.cls, result.boxes.conf):
-        if int(cls_id.item()) != person_class_id:
-            continue
-        if float(score.item()) < conf:
-            continue
+            x1, y1, x2, y2 = [int(v) for v in box.tolist()]
+            if x2 <= x1 or y2 <= y1:
+                continue
+            boxes.append((x1, y1, x2, y2))
 
-        x1, y1, x2, y2 = [int(v) for v in box.tolist()]
-        if x2 <= x1 or y2 <= y1:
-            continue
-        boxes.append((x1, y1, x2, y2))
-
-    return boxes
+        return boxes
+    return []
 
 
 def _select_closest_person(

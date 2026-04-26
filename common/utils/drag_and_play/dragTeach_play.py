@@ -21,8 +21,8 @@ DEFAULT_ARM_PORT = 8080
 SKIP = 4
 MAX_JOINT_STEP = 0.5
 SEND_INTERVAL_MS = 20
-FOLLOW_MODE = False  # 1.1.4版本必须用低跟随
-TRAJECTORY_MODE = 1  # 曲线拟合模式
+FOLLOW_MODE = True  # 1.1.4版本必须用低跟随
+TRAJECTORY_MODE = 0  # 曲线拟合模式
 SMOOTH_RADIO = 50
 
 # -------------------------- 轨迹加载与插补（内部辅助函数） --------------------------
@@ -77,13 +77,45 @@ def load_and_interpolate_trajectory(file_path):
     print(f"   预计时长：{len(final_joints)*SEND_INTERVAL_MS/1000:.1f}s")
     return final_joints
 
+def load_trajectory_raw(file_path):
+    """
+    Load and parse trajectory file without skipping points or interpolation.
+    :param file_path: Path to the trajectory file
+    :return: list of joint arrays (6 joints each, scaled by 1/1000)
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Trajectory file does not exist: {file_path}")
+    
+    raw_joint_list = []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                point = data.get("point")
+                if point and len(point) == 6:
+                    # Scale down by 1000 as per original logic to convert units
+                    joints = [x / 1000.0 for x in point]
+                    raw_joint_list.append(np.array(joints))
+            except json.JSONDecodeError:
+                continue
+    
+    if len(raw_joint_list) < 2:
+        raise ValueError("Insufficient trajectory points (need at least 2)")
+    
+    print(f"✅ Raw trajectory loaded")
+    print(f"   Total points loaded: {len(raw_joint_list)}")
+    
+    return raw_joint_list
 # -------------------------- 轨迹执行（内部辅助函数） --------------------------
 def run_canfd_trajectory(arm, joint_list):
     """执行CANFD轨迹复现（内部函数，无需外部调用）"""
     # 1. 运动到轨迹起点
     first_joint = joint_list[0]
     # print(f"1. 运动到轨迹起点")
-    arm.rm_movej(first_joint, 20, 0, 0, 1)
+    arm.rm_movej(first_joint, 30, 0, 0, 1)
     # time.sleep(1.5)
     
     # 2. 高频透传执行轨迹
@@ -91,7 +123,7 @@ def run_canfd_trajectory(arm, joint_list):
     total = len(joint_list)
     success = 0
     fail = 0
-    interval = SEND_INTERVAL_MS / 2000
+    interval = 0.006
 
     for idx, joint in enumerate(joint_list):
         ret = arm.rm_movej_canfd(
@@ -104,7 +136,7 @@ def run_canfd_trajectory(arm, joint_list):
         
         if ret == 0:
             success += 1
-            print("\r✅ 第{idx+1}点成功", end="")
+            print(f"\r✅ 第{idx+1}点成功", end="")
         else:
             fail += 1
             print(f"⚠️  第{idx+1}点失败：{ret}")
@@ -124,10 +156,10 @@ def play_robot_trajectory(trajectory_file, arm_ip=DEFAULT_ARM_IP, arm_port=DEFAU
     :param arm: 已初始化的RoboticArm实例（可选，复用连接）
     :return: bool - 执行成功返回True，失败返回False
     """
-    print("="*60)
-    print(f"📌 开始执行轨迹复现：{trajectory_file}")
-    print("="*60)
-    print("⚠️  运行前确认：机械臂已回零、伺服使能、周围无障碍物")
+    # DEBUG
+    # print("="*60)
+    # print(f"📌 开始执行轨迹复现：{trajectory_file}")
+    # print("="*60)
 
     # 复用外部传入的arm实例，否则新建
     own_arm = arm is None
@@ -139,7 +171,7 @@ def play_robot_trajectory(trajectory_file, arm_ip=DEFAULT_ARM_IP, arm_port=DEFAU
             return False
 
     try:
-        joint_list = load_and_interpolate_trajectory(trajectory_file)
+        joint_list = load_trajectory_raw(trajectory_file)
         run_canfd_trajectory(arm, joint_list)
         return True
     except Exception as e:
@@ -151,7 +183,8 @@ def play_robot_trajectory(trajectory_file, arm_ip=DEFAULT_ARM_IP, arm_port=DEFAU
             arm.rm_delete_robot_arm()
             print("\n✅ 机械臂连接已释放")
         else:
-            print("\n✅ 复用的arm连接未释放")
+            # print("\n✅ 复用的arm连接未释放")
+            None
 # -------------------------- 保留命令行运行逻辑 --------------------------
 if __name__ == "__main__":
     # 命令行运行时，支持传入轨迹文件参数

@@ -14,6 +14,7 @@ pids/
 *.pt
 *.mp3
 models/
-cache/
+*cache/
 log.txt
 maps/
+*.tar.xz

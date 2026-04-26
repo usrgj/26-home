@@ -22,6 +22,7 @@ SEATS = [
     {"id": "seat_5", "occupied": None, "box1": [0,0,0, 0], "box2": [324, 1, 416, 155]},
 ]
 PRE_OCCUPIED_SEATS = []
+HOST_SEATS = "seat_3"
 
 # 位置对应的导航站点；此处 angle 仍沿用导航接口既有配置语义
 SEATS_MAPPING = [

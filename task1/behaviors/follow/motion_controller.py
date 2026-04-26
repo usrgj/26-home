@@ -111,6 +111,7 @@ class MotionController:
         self._last_linear_vel = 0.0
         self._last_angular_vel = 0.0
         self.is_freezed = False
+        self.is_linear_freezed = False
 
     def compute_velocity(self, target: TargetState, robot_pose: RobotPose,
                          obstacle_sectors: np.ndarray) -> Tuple[float, float]:

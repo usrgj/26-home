@@ -11,7 +11,7 @@ from common.skills.agv_api import agv
 from common.skills.arm import left_arm, left_gripper
 from common.skills.head_control import pan_tilt
 from common.skills.camera import camera_manager as cams
-from task1.behaviors.show import viewer
+# from task1.behaviors.show import viewer
 from task1.config import LEFT_HOME_JOINTS, ARM_SPEED
 
 
@@ -26,10 +26,10 @@ class Release(State):
         except Exception:
             pass
         
-        try:
-            viewer.stop()
-        except Exception:
-            pass
+        # try:
+        #     viewer.stop()
+        # except Exception:
+        #     pass
 
         try:
             cams.stop_all()
