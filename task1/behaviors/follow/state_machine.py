@@ -66,9 +66,10 @@ class StateMachine:
         self._transition_to(FollowState.DIRECT_FOLLOW)
         logger.info("跟随开始 → DIRECT_FOLLOW")
     
-    def stop(self):
-        """停止底盘与导航，并回到空闲状态。"""
-        self._robot_api.stop()
+    def stop(self, send_stop: bool = True):
+        """停止导航并回到空闲状态，必要时下发一次底盘停止。"""
+        if send_stop:
+            self._robot_api.stop()
         try:
             self._robot_api.cancel_navigation()
         except:
@@ -211,7 +212,6 @@ class StateMachine:
             return
         
         if now - self._state_enter_time > SEARCH_TIMEOUT:
-            self._robot_api.stop()
             self._transition_to(FollowState.LOST)
             logger.warning(f"搜索超时 {SEARCH_TIMEOUT}s → LOST")
     

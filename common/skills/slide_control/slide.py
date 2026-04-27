@@ -62,14 +62,14 @@ class ModbusRTUMonitor:
             with self._lock:
                 self.serial.reset_input_buffer()  # 清空接收缓冲区
                 self.serial.write(command_bytes)
-                print(f"[发送指令] {full_hex}")
+                # print(f"[发送指令] {full_hex}")
 
                 # 等待响应
                 response = self.serial.read(response_len)
 
             if len(response) == response_len:
                 response_hex = ' '.join(f"{b:02X}" for b in response)
-                print(f"[收到响应] {response_hex}")
+                # print(f"[收到响应] {response_hex}")
                 return list(response)
             else:
                 print(f"[响应超时] 期望 {response_len} 字节，实际收到 {len(response)} 字节")
@@ -125,7 +125,7 @@ class ModbusRTUMonitor:
         if value is not None:
             value = value & 0xFFFF  # 状态字只有16位
             status_text = self.parse_status_word(value)
-            print(f"[状态字] 0x{value:04X} -> {status_text}")
+            # print(f"[状态字] 0x{value:04X} -> {status_text}")
         return value
 
     def read_actual_position(self):

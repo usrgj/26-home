@@ -26,7 +26,7 @@ from task1 import config
 # 导入语言配置
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
-from common.config import LANGUAGE
+
 
 log = logging.getLogger("task1.introduce_guests")
 
@@ -37,6 +37,8 @@ class IntroduceGuests(State):
         if len(guests) < 2:
             log.warning("客人数量不足，跳过介绍阶段")
             return "receive_bag"
+        
+        
 
         first_guest = guests[0]
         second_guest = guests[1]
@@ -83,7 +85,7 @@ def _get_intro_view_station_id(fallback_seat_id: str) -> str:
 
 def _face_guest(view_station_id: str, target_seat_id: str) -> None:
     try:
-        pan_tilt.home()
+        pan_tilt.move_absolute(0, -20000)
     except Exception as exc:
         log.warning("云台回中失败: %s", exc)
 

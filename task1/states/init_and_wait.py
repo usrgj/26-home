@@ -32,7 +32,9 @@ class InitAndWait(State):
         
 
         # 建立底盘通讯(需要释放)
+        from task1.behaviors.follow.robot_api import RobotAPI
         agv.start()
+        ctx.follow_robot_api = RobotAPI()
 
         # 异步预热相机，后续状态中 get_frames() 直接读取最新缓存，不阻塞状态机
         cams.start_async(CAMERA_HEAD)

@@ -37,6 +37,15 @@ class TaskContext:
         # for idx in config.PRE_OCCUPIED_SEATS:
         #     self.seats[idx]["occupied"] = True
         self.occupy_seat(self.host_seat_id)
+        
+        # 主人的信息
+        self.host_angle = 0.0
+        self.host_nav = ""
+        for s in config.SEATS_MAPPING:
+            if s["seat_id"] == self.host_seat_id :
+                self.host_angle = s["angle"]
+                self.host_nav = s["nav_id"]
+                break
 
         # 包相关
         self.bag_received: bool = False

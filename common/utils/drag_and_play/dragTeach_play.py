@@ -123,7 +123,7 @@ def run_canfd_trajectory(arm, joint_list):
     total = len(joint_list)
     success = 0
     fail = 0
-    interval = 0.006
+    interval = 0.005
 
     for idx, joint in enumerate(joint_list):
         ret = arm.rm_movej_canfd(

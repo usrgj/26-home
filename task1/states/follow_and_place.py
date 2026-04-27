@@ -17,6 +17,8 @@ from common.state_machine import State
 # from common.skills.arm import left_arm, right_arm, left_gripper
 from common.skills.arm import left_arm,  left_gripper
 from common.skills.slide_control import slide_control
+from common.skills.head_control import pan_tilt
+from common.skills.agv_api import agv, wait_nav
 from task1 import config
 from task1.behaviors.follow import FollowRunner
 
@@ -29,7 +31,17 @@ class FollowAndPlace(State):
 
     def execute(self, ctx) -> str:
         # ── 跟随主人 (+200) ──
-        runner = FollowRunner()
+        agv.navigate_to(agv.get_current_station(), ctx.host_nav, angle=ctx.host_angle)
+        
+        slide_control.send_axis(-2000000)
+        pan_tilt.home()
+        wait_nav(timeout=config.NAV_TIMEOUT)
+        robot_api = getattr(ctx, "follow_robot_api", None)
+        runner = FollowRunner(robot_api=robot_api)
+        
+        # 去往host边上
+        
+        
         follow_started_at = time.time()
         
         #持续监听放包指令 author: mhl
@@ -42,6 +54,7 @@ class FollowAndPlace(State):
         name="place-command-listener",
         daemon=True,
         )
+        
 
         _safe_speak("I will follow you. Please say put it here when you want me to place the bag.")
         listener_thread.start()

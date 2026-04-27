@@ -18,8 +18,11 @@ from dataclasses import dataclass
 from .config import (
     EKF_PROCESS_NOISE_POS, EKF_PROCESS_NOISE_VEL,
     EKF_MEASUREMENT_NOISE_LIDAR, EKF_MEASUREMENT_NOISE_VISION,
-    EKF_MAX_COAST_TIME,
+    EKF_MAX_COAST_TIME, TARGET_PREDICTION_HORIZON,
+    LIDAR_VISION_GATE_DISTANCE, LIDAR_EKF_GATE_DISTANCE,
+    LIDAR_COAST_GATE_MAX_DISTANCE,
 )
+
 from .lidar_processor import PersonCandidate
 from .vision_detector import PersonDetection
 
@@ -127,7 +130,7 @@ class SensorFusion:
             self._last_time = timestamp
             self._coast_time += dt
     
-    def get_target_state(self, prediction_horizon: float = 0.5) -> TargetState:
+    def get_target_state(self, prediction_horizon: float = TARGET_PREDICTION_HORIZON) -> TargetState:
         if not self._initialized:
             return TargetState(is_valid=False)
         
@@ -156,35 +159,71 @@ class SensorFusion:
         self._vision_anchor = (world_x, world_y)
         self._vision_anchor_time = time.time()
     
-    def associate_lidar_candidates(self, candidates: List[PersonCandidate],
-                                    gate_distance: float = 0.8
-                                    ) -> Optional[PersonCandidate]:
-        if not self._initialized or len(candidates) == 0:
+    def associate_lidar_candidates(
+        self,
+        candidates: List[PersonCandidate],
+        vision_target: Optional[PersonDetection] = None,
+        gate_distance: float = LIDAR_EKF_GATE_DISTANCE,
+    ) -> Optional[PersonCandidate]:
+        """关联LiDAR候选：当前视觉目标优先，否则使用EKF预测位置。"""
+        if len(candidates) == 0:
             return None
-        
-        now = time.time()
 
-        anchor = self._vision_anchor
-        anchor_time = self._vision_anchor_time
-        if anchor is not None and (now - anchor_time) < 1.0:
-            cx, cy = anchor
-        else:
-            cx, cy = self._state[0], self._state[1]
+        if vision_target is not None:
+            return self._associate_by_vision_target(candidates, vision_target)
+
+        if not self._initialized:
+            return None
+
+        cx = self._state[0] + self._state[2] * TARGET_PREDICTION_HORIZON
+        cy = self._state[1] + self._state[3] * TARGET_PREDICTION_HORIZON
 
         effective_gate = gate_distance
         if self._coast_time > 0.3:
-            effective_gate = min(gate_distance + self._coast_time * 0.3, 1.5)
-        
+            effective_gate = min(
+                gate_distance + self._coast_time * 0.3,
+                LIDAR_COAST_GATE_MAX_DISTANCE,
+            )
+
         best_candidate = None
-        best_dist = float('inf')
-        
+        best_score = float("inf")
+
         for cand in candidates:
             dist = math.hypot(cand.world_x - cx, cand.world_y - cy)
-            if dist < effective_gate and dist < best_dist:
-                best_dist = dist
+            confidence_penalty = (1.0 - cand.confidence) * 0.1
+            score = dist + confidence_penalty
+            if dist < effective_gate and score < best_score:
+                best_score = score
                 best_candidate = cand
-        
+
         return best_candidate
+
+    def _associate_by_vision_target(
+        self,
+        candidates: List[PersonCandidate],
+        vision_target: PersonDetection,
+    ) -> Optional[PersonCandidate]:
+        """在当前视觉目标附近选择LiDAR候选，降低多人场景串人风险。"""
+        best_candidate = None
+        best_score = float("inf")
+
+        for cand in candidates:
+            local_dist = math.hypot(
+                cand.local_x - vision_target.local_x,
+                cand.local_y - vision_target.local_y,
+            )
+
+            if local_dist > LIDAR_VISION_GATE_DISTANCE:
+                continue
+
+            confidence_penalty = (1.0 - cand.confidence) * 0.1
+            score = local_dist + confidence_penalty
+            if score < best_score:
+                best_score = score
+                best_candidate = cand
+
+        return best_candidate
+
     
     def get_speed_variance(self) -> float:
         """返回速度估计的方差（取 vx, vy 方差的最大值）"""

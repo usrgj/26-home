@@ -12,7 +12,7 @@ from typing import Optional
 
 import numpy as np
 
-from .config import MAIN_LOOP_RATE, MAP_POINTS_NPY_PATH
+from .config import MAIN_LOOP_RATE, MAP_POINTS_NPY_PATH, VELOCITY_COMMAND_MIN_PERIOD
 from .robot_api import RobotAPI, RobotPose
 from .lidar_processor import LidarProcessor
 from .vision_detector import VisionDetector
@@ -63,6 +63,7 @@ class FollowRunner:
 
         self._loop_rate = loop_rate
         self._loop_period = 1.0 / loop_rate if loop_rate > 0 else 0.0
+        self._velocity_min_period = max(0.0, VELOCITY_COMMAND_MIN_PERIOD)
         self._vision_interval = max(1, vision_interval)
         self._status_log_interval = max(1, int(loop_rate * 2))
         self._map_points_npy_path = map_points_npy_path
@@ -75,6 +76,7 @@ class FollowRunner:
         self._last_result: Optional[FollowStepResult] = None
         self._last_robot_pose = RobotPose()
         self._last_target_state = TargetState(is_valid=False)
+        self._last_velocity_send_time = 0.0
 
     @property
     def target_locked(self) -> bool:
@@ -100,6 +102,7 @@ class FollowRunner:
         self._last_robot_pose = RobotPose()
         self._last_target_state = TargetState(is_valid=False)
         self._target_locked = False
+        self._last_velocity_send_time = 0.0
 
         if hasattr(self._vision_det, "reset_target"):
             self._vision_det.reset_target()
@@ -297,7 +300,11 @@ class FollowRunner:
             matched_lidar = None
             if lidar_candidates:
                 # LiDAR 候选需要先和当前目标做关联，避免多人环境下串人。
-                matched_lidar = self._fusion.associate_lidar_candidates(lidar_candidates)
+                matched_lidar = self._fusion.associate_lidar_candidates(
+                    lidar_candidates,
+                    vision_target=target_detection,
+                )
+
                 if matched_lidar is not None:
                     self._fusion.update_with_lidar(matched_lidar)
 
@@ -332,10 +339,11 @@ class FollowRunner:
             if current_state == FollowState.DIRECT_FOLLOW:
                 if target_state.is_valid:
                     try:
-                        self._robot_api.send_velocity(cmd_linear, cmd_angular)
+                        self._send_velocity_paced(cmd_linear, cmd_angular)
                     except NotImplementedError:
                         pass
                 else:
+                    self._send_velocity_paced(0.0, 0.0)
                     self._motion_ctrl.stop()
 
             elif current_state == FollowState.NAV_FOLLOW:
@@ -345,11 +353,12 @@ class FollowRunner:
                 direction = self._state_machine.get_search_direction()
                 linear_vel, angular_vel = self._motion_ctrl.rotate_search(direction)
                 try:
-                    self._robot_api.send_velocity(linear_vel, angular_vel)
+                    self._send_velocity_paced(linear_vel, angular_vel)
                 except NotImplementedError:
                     pass
 
             elif current_state == FollowState.LOST:
+                self._send_velocity_paced(0.0, 0.0)
                 self._motion_ctrl.stop()
 
             elif current_state == FollowState.IDLE:
@@ -393,10 +402,32 @@ class FollowRunner:
             logger.error("跟随 step 异常", exc_info=True)
             raise
 
+    def _send_velocity_paced(
+        self,
+        linear_vel: float,
+        angular_vel: float,
+        *,
+        force: bool = False,
+    ) -> None:
+        """按最小间隔下发底盘速度；普通命令等待发送，不静默丢弃。"""
+        now = time.monotonic()
+        if not force and self._last_velocity_send_time > 0.0:
+            wait_time = self._velocity_min_period - (now - self._last_velocity_send_time)
+            if wait_time > 0:
+                time.sleep(wait_time)
+
+        self._robot_api.send_velocity(linear_vel, angular_vel)
+        self._last_velocity_send_time = time.monotonic()
+
     def stop(self) -> None:
         """停止当前跟随，不释放共享硬件资源。"""
         if not self._initialized:
             return
+
+        try:
+            self._send_velocity_paced(0.0, 0.0, force=True)
+        except Exception:
+            pass
 
         try:
             if self._motion_ctrl is not None:
@@ -406,7 +437,7 @@ class FollowRunner:
 
         try:
             if self._state_machine is not None:
-                self._state_machine.stop()
+                self._state_machine.stop(send_stop=False)
         except Exception:
             pass
 
@@ -487,7 +518,3 @@ class FollowRunner:
             lidar_candidate_count=lidar_count,
         )
         return self._last_result
-
-
-
-

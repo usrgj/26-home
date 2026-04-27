@@ -249,7 +249,7 @@ class RobotAPI:
 
     def send_velocity(self, linear_vel: float, angular_vel: float):
         """下发差速底盘速度，并在接口层做一次限幅保护。"""
-        print(time.monotonic()) #DEBUG
+
         vx = max(-ROBOT_MAX_LINEAR_VEL, min(ROBOT_MAX_LINEAR_VEL, linear_vel))
         w = max(-ROBOT_MAX_ANGULAR_VEL, min(ROBOT_MAX_ANGULAR_VEL, angular_vel))
         self._agv.send_velocity(vx=vx, w=w, duration=0)

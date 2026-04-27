@@ -168,7 +168,6 @@ class MotionController:
         )
         
         if emergency_stop:
-            self._robot_api.stop()
             return 0.0, 0.0
         
         # --- Step 5: PID计算线速度 ---
@@ -176,13 +175,13 @@ class MotionController:
         dist_error = dist_to_target - FOLLOW_DISTANCE
 
         linear_vel = 0
-        if abs(dist_error) > FOLLOW_DISTANCE_TOLERANCE or not self.is_linear_freezed: 
+        if abs(dist_error) > FOLLOW_DISTANCE_TOLERANCE + 0.1 or not self.is_linear_freezed:
             # 当没有冻结，或冻结时容差已经足够大，则开始运动
             self.is_linear_freezed = False
 
             # 距离死区：误差在容差范围内时不动
-            if abs(dist_error) < FOLLOW_DISTANCE_TOLERANCE / 4 :
-                # 误差0.1m才停止
+            if abs(dist_error) < FOLLOW_DISTANCE_TOLERANCE / 3 :
+                # 误差0.2 /3m才停止
                 linear_vel = 0.0
                 self.is_linear_freezed = True
             elif abs(dist_error) < FOLLOW_DISTANCE_TOLERANCE:
@@ -209,7 +208,7 @@ class MotionController:
         angle_tollerance = min(angle_tollerance, 0.55)
 
         # --- Step 6: PID计算角速度 ---
-        if abs(dist_error) < FOLLOW_DISTANCE_TOLERANCE  and target.speed < 0.3 and abs(angle_error) < math.radians(20) and abs(local_y) < 0.2:
+        if abs(dist_error) < FOLLOW_DISTANCE_TOLERANCE + 0.1  and target.speed < 0.3 and abs(angle_error) < math.radians(20) and abs(local_y) < 0.2:
             # 已经非常接近，而且目标速度很慢，变成弱控制
             if abs(local_y) < 0.08:
                 # 横向距离足够小，停止转向
@@ -231,7 +230,7 @@ class MotionController:
         # --- Step 7: 高角速度时降低线速度 (差速底盘稳定性) ---
         angular_ratio = abs(angular_vel) / ROBOT_MAX_ANGULAR_VEL
         if angular_ratio > 0.5:
-            linear_vel *= (1.0 - 0.5 * angular_ratio)
+            linear_vel *= (1.0 - 0.35 * angular_ratio)
 
         # --- Step 8: 斜坡限制 (slew rate limiter) ---
         # 限制相邻周期速度变化量，使运动更平滑
@@ -272,8 +271,7 @@ class MotionController:
         return 0.0, direction * SEARCH_ROTATION_SPEED
     
     def stop(self):
-        """停止运动"""
-        self._robot_api.stop()
+        """重置控制器内部状态；底盘停止命令由运行器统一下发。"""
         self._linear_pid.reset()
         self._angular_pid.reset()
         self._last_linear_vel = 0.0

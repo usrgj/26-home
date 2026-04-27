@@ -211,7 +211,11 @@ class VisionDetector:
     
     def _run_detector(self, color_image: np.ndarray
                       ) -> List[Tuple[int, int, int, int, float]]:
-        results = self._model(color_image, verbose=False)
+        results = self._model(color_image, verbose=False,
+                              classes=[0],   # COCO person
+                                device=0,      # RTX4080
+                                half=True     # CUDA FP16
+                                )
         bboxes = []
         for result in results:
             for box in result.boxes:
