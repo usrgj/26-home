@@ -1,29 +1,25 @@
-"""决策节点：判断下一步取衣物还是结束
+"""决策节点：判断是否继续从洗衣机取衣
 
 优先级:
-  1. 篮子还有衣物 → pick_from_basket
-  2. 洗衣机还有衣物 → open_washer (若未开门) / pick_from_washer
-  3. 桌上还有未折叠的衣物 → fold_one
-  4. 全部完成 → finished
+  1. 手里还有衣物 → transport_to_table
+  2. 洗衣机还有衣物 → nav_to_washer，先回到洗衣机前再取衣
+  3. 全部完成或失败过多 → release
 """
 
 from common.state_machine import State
+from task3 import config
 
 
 class DecideNext(State):
 
     def execute(self, ctx) -> str:
-        # 还有未取的衣物
-        if ctx.basket_remaining > 0:
-            return "pick_from_basket"
+        """根据上下文计数选择下一状态。"""
+        if ctx.cloth_in_hand:
+            return "transport_to_table"
 
         if ctx.washer_remaining > 0:
-            if not ctx.washer_door_opened:
-                return "open_washer"
-            return "pick_from_washer"
+            if ctx.washer_pick_failures >= config.MAX_PICK_RETRIES:
+                return "release"
+            return "nav_to_washer"
 
-        # 桌上有未折叠的
-        if ctx.clothes_on_table > ctx.clothes_folded:
-            return "fold_one"
-
-        return "finished"
+        return "release"

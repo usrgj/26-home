@@ -1,145 +1,171 @@
-from ultralytics import YOLO
-import cv2
-import numpy as np
-import pyrealsense2 as rs
+"""task2 厨房视觉识别适配层。
 
-# ====================== 深度相机序列号（你原来的） ======================
-CAMERA_SERIAL = {
-    "head": "151222072331",
-    "chest": "151222073707",
-    "left_arm": "141722075710",
-    "right_arm": "239722070896"
-}
+本模块只封装视觉识别，不在导入时启动相机或加载模型。状态执行时按需
+调用 KitchenDetector.detect()，将不同模型输出统一成 DetectedObject。
+"""
 
-# ====================== 模型路径（你原来的） ======================
-COCO_MODEL_PATH   = "/home/blinx/桌面/26-home/task2/behaviors/AI/yolov8n.pt"
-PLATE_MODEL_PATH  = "/home/blinx/桌面/26-home/task2/behaviors/AI/best.pt"
+from __future__ import annotations
 
-coco_model = YOLO(COCO_MODEL_PATH, task="detect", verbose=False)
-plate_model = YOLO(PLATE_MODEL_PATH, task="detect", verbose=False)
+import logging
+import time
+from pathlib import Path
+from typing import Any
 
-# ====================== 打开深度相机（稳定版） ======================
-def open_camera_by_position(camera_name):
-    pipeline = rs.pipeline()
-    config = rs.config()
+from task2 import config
+from task2.context import (
+    DetectedObject,
+    classify_label,
+    normalize_label,
+)
 
-    # 不写死序列号，直接打开任意已连接的深度相机
-    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+log = logging.getLogger("task2.kitchen_detector")
 
-    try:
-        pipeline.start(config)
-        print("✅ 深度相机已打开，正在显示画面...")
-        return pipeline
-    except Exception as e:
-        print(f"❌ 相机打开失败: {e}")
+
+
+class KitchenDetector:
+    """懒加载 YOLO 模型，并对多帧检测结果做简单去重。"""
+
+    def __init__(self):
+        self._model: Any | None = None
+
+    def detect(self, camera_serial: str, source_area: str) -> list[DetectedObject]:
+        """从指定相机采样并返回 task2 统一识别结果。"""
+        try:
+            camera = self._get_camera(camera_serial)
+        except Exception as exc:
+            log.warning("相机不可用，返回空识别结果: %s", exc)
+            return []
+
+        tracks: list[DetectedObject] = []
+
+        for _ in range(config.VISUAL_SAMPLE_COUNT):
+            frame = self._wait_for_frame(camera)
+            if frame is None:
+                continue
+
+            for detected in self._detect_frame(self._get_model(), frame, source_area):
+                self._merge_detection(tracks, detected)
+
+            time.sleep(config.VISUAL_SAMPLE_INTERVAL_S)
+
+        return tracks
+
+    def _get_camera(self, camera_serial: str):
+        """按需获取相机对象，未预热时由 camera_manager 懒启动。"""
+        from common.skills.camera import camera_manager
+
+        return camera_manager.get(camera_serial)
+
+    def _get_model(self) -> Any:
+        """按需加载自训练模型。"""
+        if self._model is not None:
+            return self._model
+
+        from ultralytics import YOLO
+        self._model = YOLO(config.CUSTOM_MODEL_PATH)
+        return self._model
+
+    def _wait_for_frame(self, camera, timeout_s: float = 1.5):
+        """等待相机缓存产生一帧彩色图像。"""
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            color_frame, _ = camera.get_frames()
+            if color_frame is not None:
+                return color_frame
+            time.sleep(0.05)
         return None
 
-# ====================== IOU ======================
-def iou(box1, box2):
-    x1, y1, x2, y2 = box1
-    a1, b1, a2, b2 = box2
-    xi1 = max(x1, a1)
-    yi1 = max(y1, b1)
-    xi2 = min(x2, a2)
-    yi2 = min(y2, b2)
-    inter_area = max(0, xi2 - xi1) * max(0, yi2 - yi1)
-    box1_area = (x2 - x1) * (y2 - y1)
-    box2_area = (a2 - a1) * (b2 - b1)
-    union_area = box1_area + box2_area - inter_area
-    return inter_area / union_area if union_area > 0 else 0
-
-# ====================== 检测绘制 ======================
-def detect_and_draw(frame, conf_threshold=0.5, iou_threshold=0.4):
-    plate_detections = []
-    plate_results = plate_model(frame, verbose=False)
-    for r in plate_results:
-        for box in r.boxes:
-            conf = float(box.conf[0])
-            if conf < conf_threshold:
-                continue
-            cls = int(box.cls[0])
-            label = plate_model.names[cls]
-            x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
-            plate_detections.append((x1, y1, x2, y2, label, conf))
-
-    coco_keep_labels = ["milk", "dining table"]
-    coco_detections = []
-    coco_results = coco_model(frame, verbose=False)
-    for r in coco_results:
-        for box in r.boxes:
-            conf = float(box.conf[0])
-            if conf < conf_threshold:
-                continue
-            cls = int(box.cls[0])
-            label = coco_model.names[cls]
-            if label not in coco_keep_labels:
-                continue
-
-            x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
-            coco_box = (x1, y1, x2, y2)
-
-            duplicate = False
-            for p_box in plate_detections:
-                if iou(coco_box, p_box[:4]) > iou_threshold:
-                    duplicate = True
-                    break
-            if not duplicate:
-                coco_detections.append((x1, y1, x2, y2, label, conf))
-
-    all_detections = plate_detections + coco_detections
-
-    for det in all_detections:
-        x1, y1, x2, y2, label, conf = det
-        if label == "plate":
-            color = (0, 255, 0)
-        elif label == "oatmeal":
-            color = (0, 255, 255)
-        elif label == "crash_can":
-            color = (0, 0, 255)
-        else:
-            color = (255, 0, 0)
-
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(frame, f"{label} {conf:.2f}",
-                    (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-    return frame
-
-# ====================== 主函数：只保证打开相机 + 出画面 ======================
-def start_detection(camera_name="head"):
-    pipeline = open_camera_by_position(camera_name)
-    if not pipeline:
-        return
-
-    align = rs.align(rs.stream.color)
-
-    while True:
+    def _detect_frame(self, model, frame, source_area: str) -> list[DetectedObject]:
+        """对单帧图像执行检测并转为 DetectedObject。"""
+        detections: list[DetectedObject] = []
         try:
-            frames = pipeline.wait_for_frames()
-        except:
-            continue
+            results = model(
+                frame,
+                conf=config.DETECTION_CONFIDENCE,
+                verbose=False,
+                stream=True,
+            )
+        except Exception as exc:
+            log.warning("视觉模型推理失败: %s", exc)
+            return detections
 
-        aligned_frames = align.process(frames)
-        color_frame = aligned_frames.get_color_frame()
-        if not color_frame:
-            continue
+        for result in results:
+            names = getattr(result, "names", None) or getattr(model, "names", {})
+            boxes = getattr(result, "boxes", None)
+            if boxes is None:
+                continue
 
-        # 转成图像
-        color_image = np.asanyarray(color_frame.get_data())
+            for box in boxes:
+                detected = self._box_to_detected_object(box, names, source_area)
+                if detected is not None:
+                    detections.append(detected)
 
-        # 检测
-        color_image = detect_and_draw(color_image)
+        return detections
 
-        # 显示画面
-        cv2.imshow("Kitchen Camera", color_image)
+    def _box_to_detected_object(
+        self,
+        box,
+        names: dict[int, str],
+        source_area: str,
+    ) -> DetectedObject | None:
+        """把 YOLO box 对象转为统一识别结果。"""
+        try:
+            class_id = int(box.cls[0])
+            raw_label = str(names.get(class_id, class_id))
+            label = normalize_label(raw_label)
+            if label in config.IGNORED_LABELS:
+                return None
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+            confidence = float(box.conf[0])
+            x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
+        except Exception as exc:
+            log.debug("解析检测框失败: %s", exc)
+            return None
 
-    pipeline.stop()
-    cv2.destroyAllWindows()
+        category = classify_label(label)
+        return DetectedObject(
+            label=label,
+            category=category,
+            confidence=confidence,
+            bbox=(x1, y1, x2, y2),
+            source_area=source_area,
+        )
 
-if __name__ == '__main__':
-    start_detection()
+    def _merge_detection(
+        self,
+        tracks: list[DetectedObject],
+        detected: DetectedObject,
+    ) -> None:
+        """按同类标签和 bbox 重叠合并多帧检测结果。"""
+        for index, current in enumerate(tracks):
+            if current.label != detected.label:
+                continue
+            if _iou(current.bbox, detected.bbox) < config.DETECTION_IOU_THRESHOLD:
+                continue
+            if detected.confidence > current.confidence:
+                tracks[index] = detected
+            return
 
+        tracks.append(detected)
+
+
+def _iou(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> float:
+    """计算两个 xyxy 检测框的 IOU。"""
+    x1, y1, x2, y2 = first
+    a1, b1, a2, b2 = second
+
+    inter_x1 = max(x1, a1)
+    inter_y1 = max(y1, b1)
+    inter_x2 = min(x2, a2)
+    inter_y2 = min(y2, b2)
+    inter_area = max(0, inter_x2 - inter_x1) * max(0, inter_y2 - inter_y1)
+
+    first_area = max(0, x2 - x1) * max(0, y2 - y1)
+    second_area = max(0, a2 - a1) * max(0, b2 - b1)
+    union_area = first_area + second_area - inter_area
+    if union_area <= 0:
+        return 0.0
+    return inter_area / union_area

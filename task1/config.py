@@ -14,23 +14,24 @@ STATION_SEAT2 = "LM4"
 STATION_SEAT3 = "LM5"
 
 # ── 座位状态 初始设为未知  ─────────────────────────────────────────────────
+
 SEATS = [
-    {"id": "seat_1", "occupied": None, "box1": [0, 0, 0, 0], "box2": [190, 10, 297, 153]},  # box1 是在第一个观察位置看到的座位框，box2 是在第二个观察位置看到的座位框，如果某个位置看不到这个座位就设为 [0,0,0,0]
-    {"id": "seat_2", "occupied": None, "box1": [439, 201, 639, 407], "box2": [0, 0, 0,0]},
-    {"id": "seat_3", "occupied": None, "box1": [0, 0, 0, 0], "box2": [53, 160, 261, 324]}, #seat3,"box1": [472, 102, 621, 217]
-    {"id": "seat_4", "occupied": None, "box1": [237, 16, 345, 139], "box2": [437, 41, 583, 321]},
-    {"id": "seat_5", "occupied": None, "box1": [0,0,0, 0], "box2": [324, 1, 416, 155]},
+    {"id": "seat_1", "occupied": None, "box1": [0, 0, 0, 0], "box2": [138, 11, 239, 190]},  # box1 是在第一个观察位置看到的座位框，box2 是在第二个观察位置看到的座位框，如果某个位置看不到这个座位就设为 [0,0,0,0]
+    {"id": "seat_2", "occupied": None, "box1": [375, 146, 637, 444], "box2": [0, 0, 0, 0]},
+    {"id": "seat_3", "occupied": None, "box1": [0,0,0,0 ], "box2": [210, 132, 404, 338]},
+    {"id": "seat_4", "occupied": None, "box1": [230, 23, 330, 103], "box2": [0, 0, 0, 0]},
+    {"id": "seat_5", "occupied": None, "box1": [0, 0, 0, 0], "box2": [354, 10, 464, 125]},
 ]
 PRE_OCCUPIED_SEATS = []
 HOST_SEATS = "seat_3"
 
 # 位置对应的导航站点；此处 angle 仍沿用导航接口既有配置语义
 SEATS_MAPPING = [
-    {"seat_id": "seat_1", "nav_id": STATION_SEAT1, "angle": 87.766},
-    {"seat_id": "seat_2", "nav_id": STATION_SEAT1, "angle": 18.850},
-    {"seat_id": "seat_3", "nav_id": STATION_SEAT2, "angle": -102.325},
-    {"seat_id": "seat_4", "nav_id": STATION_SEAT2, "angle": -176.202},
-    {"seat_id": "seat_5", "nav_id": STATION_SEAT3, "angle": -102.863},
+    {"seat_id": "seat_1", "nav_id": STATION_SEAT1, "angle": -9.55},
+    {"seat_id": "seat_2", "nav_id": STATION_SEAT1, "angle": -59.90},
+    {"seat_id": "seat_3", "nav_id": STATION_SEAT2, "angle": 154.595},
+    {"seat_id": "seat_4", "nav_id": STATION_SEAT2, "angle": 90},
+    {"seat_id": "seat_5", "nav_id": STATION_SEAT3, "angle": 172.409},
 ]
 
 # 介绍阶段使用的朝向配置：
@@ -39,25 +40,25 @@ SEATS_MAPPING = [
 # 值 = 底盘原地转向的目标角度（度）
 INTRO_LOOK_ANGLES_DEG = {
     STATION_SEAT1: {
-        "seat_1": 81.033,
-        "seat_2": 8.405,
-        "seat_3": 29.209,
-        "seat_4": 58.281,
-        "seat_5": 81.033,
+        "seat_1": 0,
+        "seat_2": -56.91,
+        "seat_3": -41.50,
+        "seat_4": -19.21,
+        "seat_5": 0,
     },
     STATION_SEAT2: {
-        "seat_1": -142.277,
-        "seat_2": -124.590,
-        "seat_3": -91.496,
-        "seat_4": 173.858,
-        "seat_5": -167.985,
+        "seat_1": 131.31,
+        "seat_2": 156.99,
+        "seat_3": 163.98,
+        "seat_4": 93.63,
+        "seat_5": 105.62,
     },
     STATION_SEAT3: {
-        "seat_1": -92.636,
-        "seat_2": -68.807,
-        "seat_3": -43.745,
-        "seat_4": -8.669,
-        "seat_5": -92.636,
+        "seat_1": 175.8,
+        "seat_2": -166.58,
+        "seat_3": -143.23,
+        "seat_4": -130.75,
+        "seat_5": 175.8,
     },
 }
 
@@ -83,8 +84,3 @@ TRAJECTORY_GET_PATH = "/home/blinx/26-home/common/utils/drag_and_play/open_door_
 TRAJECTORY_MOVE_PATH = "/home/blinx/26-home/common/utils/drag_and_play/open_door_trajectory/move.txt"
 TRAJECTORY_LEAVE_PATH = "/home/blinx/26-home/common/utils/drag_and_play/open_door_trajectory/leave.txt"
 
-
-# ── 饮料列表 ───────────────────────────────────────────────────────────
-COMMON_DRINKS = ["可乐", "雪碧", "芬达", "美年达", "七喜", "果汁", "橙汁", "苹果汁",
-                              "牛奶", "酸奶", "水", "矿泉水", "茶", "红茶", "绿茶", "乌龙茶",
-                              "咖啡", "拿铁", "卡布奇诺", "啤酒", "红酒"]

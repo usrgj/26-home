@@ -1,13 +1,30 @@
+"""task2 异常恢复：跳过失败阶段并尽量继续播报流程。"""
 
-"""
-异常恢复模块（与task1对齐）
-功能：任务执行异常时的重规划与恢复逻辑
-"""
-def error_recovery():
-    """
-    1. 检测抓取失败、碰撞、物品偏移等异常状态
-    2. 触发异常处理流程，重新规划路径/抓取点
-    3. 恢复任务执行，保障任务鲁棒性
-    """
-    pass
+from __future__ import annotations
 
+import logging
+
+from common.state_machine import State
+
+log = logging.getLogger("task2.error_recovery")
+
+_STATE_ORDER = ["init", "kitchen_task", "release", "finished"]
+
+
+class ErrorRecovery(State):
+    """根据失败状态选择可继续的下一个状态。"""
+
+    def execute(self, ctx) -> str:
+        """init 或主流程失败时直接释放，避免反复触发硬件动作。"""
+        failed = ctx.failed_state
+        log.warning("从状态 [%s] 恢复", failed)
+
+        if failed in ("init", "kitchen_task"):
+            return "release"
+
+        if failed in _STATE_ORDER:
+            index = _STATE_ORDER.index(failed)
+            if index + 1 < len(_STATE_ORDER):
+                return _STATE_ORDER[index + 1]
+
+        return "release"

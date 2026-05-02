@@ -31,15 +31,28 @@ class FollowAndPlace(State):
 
     def execute(self, ctx) -> str:
         # ── 跟随主人 (+200) ──
+        # 去往host边上
         agv.navigate_to(agv.get_current_station(), ctx.host_nav, angle=ctx.host_angle)
         
         slide_control.send_axis(-2000000)
         pan_tilt.home()
+        from common.utils.voice_speak import speak_async
+        speak_async('Say follow me and I will follow you.')
         wait_nav(timeout=config.NAV_TIMEOUT)
         robot_api = getattr(ctx, "follow_robot_api", None)
         runner = FollowRunner(robot_api=robot_api)
         
-        # 去往host边上
+        
+        # for i in range(5):
+        #     text = _record_and_recognize_text()
+        #     if _match_follow_command(text):
+        #         log.info("识别到指令: %s", text)
+        #         break
+        #     time.sleep(1)
+            
+            
+            
+        
         
         
         follow_started_at = time.time()
@@ -115,6 +128,21 @@ def _match_place_command(text: str) -> bool:
     text = re.sub(r"\s+", " ", text).strip()
     return any(command in text for command in PLACE_COMMANDS)
 
+
+FOLLOW_COMMANDS = (
+    "follow",
+    "me"
+)
+def _match_follow_command(text: str) -> bool:
+    """判断识别结果里是否包含放包口令。"""
+    # 统一小写、去掉标点，方便做口令匹配。
+    text = (text or "").lower()
+    text = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return any(command in text for command in FOLLOW_COMMANDS)
+
+
+
 def _listen_for_place_command(heard_event: threading.Event,
                               stop_event: threading.Event,
                               heard_text: dict) -> None:
@@ -163,3 +191,16 @@ def _should_stop_follow(heard_event: threading.Event, start_time: float) -> bool
         return True
 
     return False
+
+def _record_and_recognize_text() -> str:
+    """录制一段语音并调用现有识别接口。"""
+    from common.skills.audio_module.voice_assiant import voice_assistant
+    audio_frames = voice_assistant.record_utterance()
+    if not audio_frames:
+        return ""
+
+    recognize_speech = getattr(voice_assistant, "recognize_speech", None)
+    if callable(recognize_speech):
+        return (recognize_speech(audio_frames) or "").strip()
+
+    return (voice_assistant.recognize(audio_frames) or "").strip()

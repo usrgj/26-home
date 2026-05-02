@@ -1,31 +1,48 @@
-"""异常恢复：根据失败位置决定继续策略"""
+"""异常恢复：根据失败位置决定重试或结束"""
 
 import logging
 from common.state_machine import State
+from task3 import config
 
 log = logging.getLogger("task3.error_recovery")
 
 _STATE_ORDER = [
-    "idle", "nav_to_laundry", "pick_from_basket", "open_washer",
-    "pick_from_washer", "transport_to_table", "fold_one",
-    "decide_next", "finished",
+    "init", "nav_to_washer", "pick_from_washer",
+    "transport_to_table", "decide_next", "release", "finished",
 ]
 
 
 class ErrorRecovery(State):
 
     def execute(self, ctx) -> str:
+        """记录失败次数，未超过上限时重试对应状态。"""
         failed = ctx.failed_state
         log.warning("从状态 [%s] 恢复", failed)
 
-        # 折叠/取衣失败 → 跳到决策节点继续下一件
-        if failed in ("fold_one", "pick_from_basket", "pick_from_washer"):
-            return "decide_next"
+        if failed == "init":
+            return "release"
 
-        # 其他状态 → 跳到下一个
+        if failed == "nav_to_washer":
+            ctx.nav_to_washer_failures += 1
+            if ctx.nav_to_washer_failures < config.MAX_NAV_TO_WASHER_RETRIES:
+                return "nav_to_washer"
+            return "release"
+
+        if failed == "pick_from_washer":
+            ctx.washer_pick_failures += 1
+            if ctx.washer_pick_failures < config.MAX_PICK_RETRIES:
+                return "pick_from_washer"
+            return "release"
+
+        if failed == "transport_to_table":
+            ctx.transport_failures += 1
+            if ctx.transport_failures < config.MAX_TRANSPORT_RETRIES:
+                return "transport_to_table"
+            return "release"
+
         if failed in _STATE_ORDER:
             idx = _STATE_ORDER.index(failed)
             if idx + 1 < len(_STATE_ORDER):
                 return _STATE_ORDER[idx + 1]
 
-        return "finished"
+        return "release"

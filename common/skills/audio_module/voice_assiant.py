@@ -2,10 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-完整语音助手模块 - 稳定版（改进 TTS 缓存机制）
-- 使用基于内容的可读文件名缓存（例如 "Welcome!.mp3"）
-- 支持预加载常用语句
-- 门铃检测可选，依赖缺失时 doorbell 为 None
+完整语音助手模块 - 支持全流程测试（两位客人姓名&饮品）
+优化名字提取，增强 Richard 和 Jennier 等名字的识别纠正。
+直接运行本脚本即可开始测试，无需机器人硬件。
 """
 
 import time
@@ -28,13 +27,15 @@ from pathlib import Path
 import pyaudio
 
 # ---------- 配置 ----------
-DOORBELL_ENABLED = True
+DOORBELL_ENABLED = True          # 测试时可保留，但流程中会跳过
 INPUT_DEVICE_INDEX = None
 RECORD_DURATION = 1.5
 SIMILARITY_THRESHOLD = 0.75
 SMOOTHING_WINDOW = 5
 COOLDOWN_SECONDS = 0.5
-TTS_SPEED = 1.0
+
+# TTS 语速（1.0 正常，1.2 略快）
+TTS_SPEED = 1.2
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -58,19 +59,6 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 TTS_CACHE_DIR = os.path.join(CURRENT_DIR, "audio_cache")
 os.makedirs(TTS_CACHE_DIR, exist_ok=True)
 
-# ---------- 辅助函数：生成安全文件名 ----------
-def safe_filename(text: str, max_len=100) -> str:
-    """将文本转换为安全、可读的文件名（例如 "Welcome!.mp3"）"""
-    # 替换非法字符（Windows/Linux 通用）
-    illegal_chars = r'[\\/*?:"<>|]'
-    safe = re.sub(illegal_chars, '_', text)
-    # 去除首尾空格和点号
-    safe = safe.strip('. ')
-    # 限制长度
-    if len(safe) > max_len:
-        safe = safe[:max_len]
-    return safe + ".mp3"
-
 # 饮料列表
 if LANGUAGE == "en":
     COMMON_DRINKS_LIST = COMMON_DRINKS
@@ -91,12 +79,65 @@ if LANGUAGE == "en":
 else:
     nlp = None
 
-# ---------- 名字和饮料提取 ----------
+# ---------- 辅助函数 ----------
+def safe_filename(text: str, max_len=100) -> str:
+    """将文本转换为安全、可读的文件名"""
+    illegal_chars = r'[\\/*?:"<>|]'
+    safe = re.sub(illegal_chars, '_', text)
+    safe = safe.strip('. ')
+    if len(safe) > max_len:
+        safe = safe[:max_len]
+    return safe + ".mp3"
+
+# ---------- 名字提取优化 ----------
+def _normalize_name(name: str) -> str:
+    """将识别出的名字纠正为标准形式（针对英文）"""
+    if not name:
+        return name
+    # 标准名字列表（首字母大写）
+    known_names = ["Jack", "John", "Richard", "Allen", "Mike", "Grace", "Linda", "Lily", "Lucy", "Jennier"]
+    # 常见错误映射（不区分大小写）
+    correction_map = {
+        "rechard": "Richard",
+        "richord": "Richard",
+        "recard": "Richard",
+        "jenny": "Jennier",
+        "jennie": "Jennier",
+        "jennifer": "Jennier",
+        "gennifer": "Jennier",
+        "jenn": "Jennier",
+        "jhon": "John",
+        "jon": "John",
+        "mikey": "Mike",
+        "lucyy": "Lucy",
+        "lindaa": "Linda",
+        "gracy": "Grace",
+    }
+    lower_name = name.lower()
+    # 精确匹配或前缀匹配
+    for wrong, correct in correction_map.items():
+        if lower_name == wrong or lower_name.startswith(wrong):
+            return correct
+    # 模糊匹配最接近的标准名字
+    matches = get_close_matches(lower_name, [n.lower() for n in known_names], n=1, cutoff=0.6)
+    if matches:
+        for kn in known_names:
+            if kn.lower() == matches[0]:
+                return kn
+    # 如果识别结果本身就在标准列表中（或首字母大写形式），直接返回
+    if name in known_names or name.capitalize() in known_names:
+        return name.capitalize()
+    return name
+
 def extract_name_en(text):
     if not text:
         return None
+
+    # 1. 转为小写用于前缀匹配（但保留原大小写用于最后返回）
     lower_text = text.lower()
-    cleaned = text
+    cleaned = text  # 默认原始文本
+
+    # 2. 常见前缀列表（按长度从长到短排序，避免误匹配）
     prefixes = [
         "my name is ", "i am ", "i'm ", "name is ", "this is ", "call me ",
         "i m ", "im ", "un ", "um ", "uh ", "er ", "and ", "so "
@@ -105,26 +146,40 @@ def extract_name_en(text):
         if lower_text.startswith(prefix):
             cleaned = text[len(prefix):]
             break
+
+    # 3. 如果清理后的文本以 "un " 开头（针对 "Un Jack" 情况），再次去除
     if cleaned.lower().startswith("un "):
         cleaned = cleaned[3:]
+
+    # 4. 使用 spaCy 实体识别
     doc = nlp(cleaned)
     for ent in doc.ents:
         if ent.label_ == "PERSON":
             name = ent.text.strip()
             if len(name) >= 2 and name[0].isupper():
-                return name
-    patterns = [r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"]
+                return _normalize_name(name)
+
+    # 5. 正则匹配明确的人名模式
+    patterns = [
+        r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",  # 匹配一个或两个大写开头的单词
+    ]
     for p in patterns:
         m = re.search(p, cleaned)
         if m:
             name = m.group(1).strip()
             if len(name) >= 2 and name[0].isupper():
-                return name
+                return _normalize_name(name)
+
+    # 6. 后备：提取所有大写开头的单词
     words = re.findall(r'[A-Z][a-z]+', cleaned)
     if words:
+        # 如果有多个人名部分，将前两个组合（如 "Jack Smith"）
         if len(words) >= 2 and len(words[0]) > 1 and len(words[1]) > 1:
-            return f"{words[0]} {words[1]}"
-        return words[0]
+            name = f"{words[0]} {words[1]}"
+        else:
+            name = words[0]
+        return _normalize_name(name)
+
     return None
 
 def extract_name_zh(text):
@@ -177,9 +232,8 @@ class VoiceAssistant:
         self.noise_floor = 500.0
         self.energy_history = collections.deque(maxlen=50)
         self._check_offline_tts()
-    def _get_cache_path(self, text):
-        # 注意：这里必须导入 safe_filename，或者定义相同函数
-        return os.path.join(TTS_CACHE_DIR, safe_filename(text))
+        # 预加载常用语句（后台异步）
+        self._preload_common_phrases()
 
     def _check_offline_tts(self):
         self.offline_tts_cmd = None
@@ -193,18 +247,17 @@ class VoiceAssistant:
             print("[TTS] 警告: 无离线 TTS 引擎")
 
     def _play_audio(self, file_path):
-        """通用音频播放：优先 mpg123（支持 MP3 和 WAV），回退 aplay"""
+        """通用音频播放：优先 mpg123，回退 aplay"""
         if not os.path.exists(file_path):
             print(f"[播放] 文件不存在: {file_path}")
             return False
 
-        # 方法1: mpg123（支持 MP3 和 WAV）
         mpg123_path = subprocess.run(['which', 'mpg123'], capture_output=True, text=True).stdout.strip()
         if mpg123_path:
             cmd = [mpg123_path, '-a', 'default', file_path]
             try:
                 print(f"[播放] 执行: {' '.join(cmd)}")
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)  # 增加超时到15秒
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
                 if result.returncode == 0:
                     print("[播放] 成功（mpg123）")
                     return True
@@ -215,7 +268,6 @@ class VoiceAssistant:
             except Exception as e:
                 print(f"[播放] mpg123 异常: {e}")
 
-        # 方法2: aplay（仅 WAV，作为后备）
         if file_path.endswith('.wav') and subprocess.call(['which', 'aplay'], stdout=subprocess.DEVNULL) == 0:
             cmd = ['aplay', '-f', 'S16_LE', '-r', '16000', '-c', '1', file_path]
             try:
@@ -248,7 +300,6 @@ class VoiceAssistant:
                 except Exception as e:
                     print(f"[TTS离线] 生成失败: {e}")
                     return False
-            # 使用统一播放函数
             return self._play_audio(wav_path)
         elif self.offline_tts_cmd == 'espeak':
             try:
@@ -259,26 +310,24 @@ class VoiceAssistant:
         return False
 
     def speak(self, text):
-        print(f"[机器人]: {text}")
+        print(f"[机器人 TTS 输出]: {text}")
         self.set_recording(2)
 
-        # 使用可读文件名缓存
-        cache_mp3 = os.path.join(TTS_CACHE_DIR, safe_filename(text))
-        if os.path.exists(cache_mp3):
-            if self._play_audio(cache_mp3):
+        cache_path = os.path.join(TTS_CACHE_DIR, safe_filename(text))
+        if os.path.exists(cache_path):
+            if self._play_audio(cache_path):
                 self.set_recording(3)
                 return
             else:
-                os.remove(cache_mp3)  # 损坏则删除
+                os.remove(cache_path)
 
-        # 在线 TTS（增加超时和重试）
-        for attempt in range(2):  # 重试一次
+        for attempt in range(2):
             try:
                 resp = requests.post(TTS_URL, json={"model": "tts-1", "input": text, "speed": TTS_SPEED}, timeout=8)
                 if resp.status_code == 200 and len(resp.content) > 1024:
-                    with open(cache_mp3, 'wb') as f:
+                    with open(cache_path, 'wb') as f:
                         f.write(resp.content)
-                    if self._play_audio(cache_mp3):
+                    if self._play_audio(cache_path):
                         self.set_recording(3)
                         return
                 else:
@@ -290,48 +339,10 @@ class VoiceAssistant:
                     continue
             except Exception as e:
                 print(f"[TTS在线] 异常: {e}")
-            break  # 非超时错误不重试
+            break
 
-        # 离线 TTS 降级
         self._offline_speak(text)
         self.set_recording(3)
-
-    def _preload_tts(self, text):
-        """预生成单条 TTS 音频缓存（不播放）"""
-        cache_path = self._get_cache_path(text)
-        if os.path.exists(cache_path):
-            return
-        try:
-            resp = requests.post(TTS_URL, json={"model": "tts-1", "input": text, "speed": TTS_SPEED}, timeout=5)
-            if resp.status_code == 200 and len(resp.content) > 1024:
-                with open(cache_path, 'wb') as f:
-                    f.write(resp.content)
-                print(f"[TTS预加载] 已缓存: {text[:30]}...")
-        except Exception as e:
-            print(f"[TTS预加载] 失败: {e}")
-
-    def _preload_common_phrases(self):
-        """异步预加载常用语句"""
-        if LANGUAGE == "en":
-            phrases = [
-                "Welcome! May I know your name?",
-                "Sorry, I didn't catch your name. Could you say it again?",
-                "What is your favorite drink?",
-                "Sorry, I didn't catch that. What is your favorite drink?",
-                "Please have a seat here.",
-                "Thank you! Enjoy the party."
-            ]
-        else:
-            phrases = [
-                "你好，欢迎来到派对！请问你叫什么名字？",
-                "抱歉，我没听清你的名字，能再说一遍吗？",
-                "你最喜欢的饮料是什么？",
-                "抱歉，我没听清你喜欢的饮料，能再说一次吗？",
-                "请坐在这里。",
-                "谢谢！祝您玩得开心。"
-            ]
-        for phrase in phrases:
-            threading.Thread(target=self._preload_tts, args=(phrase,), daemon=True).start()
 
     def set_recording(self, state):
         if state == 1:
@@ -339,7 +350,7 @@ class VoiceAssistant:
                 try:
                     self.stream = self.audio.open(format=FORMAT, channels=CHANNELS, rate=RATE,
                                                   input=True, frames_per_buffer=CHUNK,
-                                                  input_device_index=None)
+                                                  input_device_index=INPUT_DEVICE_INDEX)
                     time.sleep(0.2)
                     for _ in range(3):
                         self.stream.read(CHUNK, exception_on_overflow=False)
@@ -423,7 +434,7 @@ class VoiceAssistant:
                     text = resp.json().get('text', '').strip()
                     text = re.sub(r'<\|[^>]+\|>', '', text)
                     text = re.sub(r'\b(uh|um|ah|eh|er|mm|hmm)\b', '', text, flags=re.IGNORECASE)
-                    print(f"[ASR] 识别文本: '{text}'")
+                    print(f"[ASR 识别结果]: '{text}'")
                     return text
                 else:
                     print(f"[ASR] 错误: {resp.text}")
@@ -490,14 +501,41 @@ class VoiceAssistant:
         self.set_recording(0)
         self.audio.terminate()
 
-# 为了兼容旧接口
+    def _preload_common_phrases(self):
+        """后台预加载常用 TTS 缓存"""
+        common_phrases = [
+            "Welcome! May I know your name?",
+            "Sorry, I didn't catch your name. Could you say it again?",
+            "What is your favorite drink?",
+            "Sorry, I didn't catch that. What is your favorite drink?",
+            "Please have a seat here.",
+            "Thank you! Enjoy the party."
+        ]
+        for phrase in common_phrases:
+            threading.Thread(target=self._cache_tts, args=(phrase,), daemon=True).start()
+
+    def _cache_tts(self, text):
+        """异步生成 TTS 缓存文件"""
+        cache_path = os.path.join(TTS_CACHE_DIR, safe_filename(text))
+        if os.path.exists(cache_path):
+            return
+        try:
+            resp = requests.post(TTS_URL, json={"model": "tts-1", "input": text, "speed": TTS_SPEED}, timeout=10)
+            if resp.status_code == 200 and len(resp.content) > 1024:
+                with open(cache_path, 'wb') as f:
+                    f.write(resp.content)
+                print(f"[TTS预加载] 已缓存: {text[:30]}...")
+        except Exception as e:
+            print(f"[TTS预加载] 失败: {e}")
+
+# 为兼容旧接口添加别名
 VoiceAssistant.record_utterance = VoiceAssistant.record
 VoiceAssistant.recognize_speech = VoiceAssistant.recognize
 
 # ---------- 全局实例 ----------
 voice_assistant = VoiceAssistant()
 
-# ---------- 门铃检测部分（保持不变） ----------
+# ---------- 门铃检测部分（测试时可忽略） ----------
 if DOORBELL_ENABLED:
     try:
         import librosa
@@ -509,6 +547,7 @@ if DOORBELL_ENABLED:
         print(f"[门铃] 依赖缺失，自动检测禁用: {e}")
 
     if DOORBELL_DEPS:
+        # ---------- 特征提取 ----------
         def extract_features(y, sr):
             mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
             mfcc_delta = librosa.feature.delta(mfcc)
@@ -618,21 +657,78 @@ if DOORBELL_ENABLED:
         doorbell = None
 else:
     doorbell = None
-    print("[门铃] 已禁用")
+    print("[门铃] 已禁用（DOORBELL_ENABLED=False）")
 
 __all__ = ['voice_assistant', 'doorbell', 'extract_name', 'extract_drink']
 
-# ---------- 独立测试入口 ----------
+# ---------- 全流程测试入口 ----------
+def ask_info(prompt, extract_func, retry_prompt, default, max_attempts=2):
+    for attempt in range(max_attempts):
+        voice_assistant.speak(prompt if attempt == 0 else retry_prompt)
+        audio = voice_assistant.record()
+        if audio:
+            text = voice_assistant.recognize(audio)
+            if text:
+                info = extract_func(text)
+                if info:
+                    return info
+    return default
+
+def test_full_flow():
+    print("\n===== 全流程测试（两位客人）=====")
+    input("按 Enter 开始接待第一位客人...")
+    
+    # 客人1
+    name1 = ask_info(
+        "Welcome! May I know your name?",
+        extract_name,
+        "Sorry, I didn't catch your name. Could you say it again?",
+        "Friend"
+    )
+    drink1 = ask_info(
+        f"{name1}, what is your favorite drink?",
+        extract_drink,
+        "Sorry, I didn't catch that. What is your favorite drink?",
+        "Water"
+    )
+    voice_assistant.speak(f"Great, {name1}. Please have a seat.")
+    print(f"\n--- 客人1 信息 ---\n姓名: {name1}\n饮品: {drink1}\n")
+    
+    input("\n按 Enter 开始接待第二位客人...")
+    
+    # 客人2
+    name2 = ask_info(
+        "Welcome! May I know your name?",
+        extract_name,
+        "Sorry, I didn't catch your name. Could you say it again?",
+        "Friend"
+    )
+    drink2 = ask_info(
+        f"{name2}, what is your favorite drink?",
+        extract_drink,
+        "Sorry, I didn't catch that. What is your favorite drink?",
+        "Water"
+    )
+    voice_assistant.speak(f"Great, {name2}. Please have a seat.")
+    voice_assistant.speak(f"{name2}, let me introduce {name1}, who likes to drink {drink1}.")
+    voice_assistant.speak(f"{name1}, this is {name2}, who likes to drink {drink2}.")
+    voice_assistant.speak("Thank you both for coming! Enjoy the party.")
+    
+    print("\n===== 全流程测试完成 =====")
+
 if __name__ == "__main__":
-    print("独立测试模式：5秒内播放门铃将触发检测")
-    if doorbell:
+    # 启用门铃检测
+    if doorbell is not None:
+        print("等待门铃触发（30秒内）...")
         doorbell.start()
-        print("等待门铃... (10秒)")
-        if doorbell.wait_for_doorbell(10):
-            print("检测到门铃！")
+        if doorbell.wait_for_doorbell(timeout=30):
+            print("门铃已触发，开始全流程测试")
         else:
-            print("超时，未检测到")
+            print("等待超时，仍开始测试")
         doorbell.stop()
     else:
-        print("门铃不可用，测试语音合成:")
-        voice_assistant.speak("Hello, this is a test.")
+        print("门铃检测不可用，直接开始测试")
+    
+    voice_assistant.set_recording(1)
+    test_full_flow()
+    voice_assistant.close()

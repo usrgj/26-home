@@ -23,9 +23,16 @@ print(f"当前识别语言: {LANGUAGE}")
 
 # 根据语言选择热词（英文或中文）
 if LANGUAGE == "en":
-    HOTWORDS = " ".join(COMMON_DRINKS)  # 英文饮料列表
+    # 饮料热词
+    drink_hotwords = " ".join(COMMON_DRINKS)
+    # 名字热词（对难识别的名字增加权重：重复出现多次）
+    name_hotwords = (
+        "jack john richard richard richard allen mike "
+        "grace linda lily lucy jennier jennier jennier"
+    )
+    HOTWORDS = drink_hotwords + " " + name_hotwords
 else:
-    # 中文饮料列表（请根据实际情况填写）
+    # 中文饮料列表（可根据需要补充名字热词）
     HOTWORDS = "可乐 雪碧 芬达 美年达 七喜 果汁 橙汁 苹果汁 牛奶 酸奶 水 矿泉水 茶 红茶 绿茶 乌龙茶 咖啡 拿铁 卡布奇诺 啤酒 红酒"
 
 print(f"热词列表: {HOTWORDS}")
@@ -52,31 +59,21 @@ async def speech_recognition(audio: UploadFile = File(...)):
     # 根据 LANGUAGE 设置识别语言
     lang = "en" if LANGUAGE == "en" else "zh"
     
-    # 调用模型，加入热词
+    # 调用模型，加入热词（部分版本支持 hotwords_weight）
     res = model.generate(
         input=audio_data,
         cache={},
         language=lang,
         use_itn=True,
         hotwords=HOTWORDS,          # 热词增强
-        # 以下参数可能不受支持，如果报错请注释
-        # hotwords_weight=2.0,       # 热词权重（仅部分版本支持）
-        # return_spk_res=True,       # 返回置信度（仅部分版本支持）
+        # hotwords_weight=2.0,       # 可选：热词权重（如果模型支持，可取消注释）
     )
     
     if not res:
         return {"code": 200, "text": "识别失败"}
     
-    # 尝试获取置信度（如果存在）
-    # 不同版本的 FunASR 输出格式不同，常见为 res[0] 包含 'text' 和 'score'
     text = res[0].get("text", "").strip()
-    score = res[0].get("score", 1.0)   # 默认置信度 1.0
-    
-    # 可选：过滤低置信度结果（阈值 0.3 可调整）
-    # if score < 0.3:
-    #     text = ""
-    
-    # 去除特殊标记（如 <|EN|> 等）
+    # 去除语言标记
     text = text.replace("<|EN|>", "").replace("<|ZH|>", "").strip()
     
     return {"code": 200, "text": text}

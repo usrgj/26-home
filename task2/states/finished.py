@@ -1,13 +1,13 @@
+"""task2 结束状态。"""
 
-"""
-状态9：任务完成
-功能：结束任务，机器人返回待命状态
-"""
-def finished():
-    """
-    1. 确认所有任务执行完成，检查无遗留物品
-    2. 机器人返回初始待命位置，关闭冗余模块
-    3. 输出任务完成信号，结束本次作业
-    """
-    pass
+from __future__ import annotations
 
+from common.state_machine import State
+
+
+class Finished(State):
+    """状态机最终占位状态。"""
+
+    def execute(self, ctx) -> str:
+        """保持与通用状态机约定一致，返回 finished 结束。"""
+        return "finished"

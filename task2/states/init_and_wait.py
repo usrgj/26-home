@@ -1,57 +1,49 @@
+"""初始化状态：准备底盘、相机和语音播报，等待比赛开始。"""
 
-"""
-状态0：初始化与等待开始
-功能：完成机器人硬件、软件模块初始化，等待任务启动信号
-"""
+from __future__ import annotations
 
-
-import time
-from Robotic_Arm.rm_robot_interface import *
+import logging
 
 from common.state_machine import State
-from common.skills.slide_control import slide_control
-from common.skills.agv_api import agv
-from common.skills.arm import left_arm, right_arm, Gripper, IOGripper, GripperError, IOGripperError
-from common.skills.head_control import pan_tilt
-from common.skills.camera import camera_manager as cams
+from task2.states.utils import safe_speak
 
-from common.skills.audio_module import voice_assistant, doorbell, extract_name
-
-from common.config import CAMERA_HEAD, CAMERA_CHEST, CAMERA_LEFT, CAMERA_RIGHT
-from task1.config import LEFT_HOME_JOINTS, RIGHT_HOME_JOINTS, ARM_SPEED
+log = logging.getLogger("task2.init_and_wait")
 
 
 class InitAndWait(State):
+    """启动 task2 需要的非抓取能力。"""
 
     def execute(self, ctx) -> str:
+        """初始化导航和视觉模块，并等待裁判开始信号。"""
+        self._start_agv()
+        self._start_cameras()
+        self._prepare_detector(ctx)
 
-# ═══════════════════════════════════════════════════════════════════════════
-        # 导轨回中（在运行前需要检查使能并清除故障）
-        slide_control.send_axis(0000000)
+        safe_speak("Ready.")
+        input("[状态0] Task2 导航、视觉和语音就绪，按 Enter 开始比赛...")
+        return "kitchen_task"
 
-        # 建立底盘通讯(需要释放)
-        agv.start()
+    def _start_agv(self) -> None:
+        """启动底盘通信，失败时交给状态机异常恢复。"""
+        from common.skills.agv_api import agv
 
-        # 异步预热相机，后续状态中 get_frames() 直接读取最新缓存，不阻塞状态机
-        cams.start_async(CAMERA_HEAD)
-        cams.start_async(CAMERA_CHEST)
-        cams.start_async(CAMERA_LEFT)
-        cams.start_async(CAMERA_RIGHT)
+        ok = agv.start()
+        if not ok:
+            raise RuntimeError("AGV 启动失败")
 
-        # 机械臂回初始位置（需要释放）
-        left_arm.rm_movej(LEFT_HOME_JOINTS, v=ARM_SPEED, r=0, connect=0, block=0)
-        right_arm.rm_movej(RIGHT_HOME_JOINTS, v=ARM_SPEED, r=0, connect=0, block=0)
+    def _start_cameras(self) -> None:
+        """异步预热头部和胸部相机，不阻塞比赛流程。"""
+        try:
+            from common.config import CAMERA_CHEST, CAMERA_HEAD
+            from common.skills.camera import camera_manager as cams
 
-        # 云台回中
-        pan_tilt.home()
+            cams.start_async(CAMERA_HEAD)
+            cams.start_async(CAMERA_CHEST)
+        except Exception as exc:
+            log.warning("相机预热失败，后续识别会尝试懒启动: %s", exc)
 
+    def _prepare_detector(self, ctx) -> None:
+        """创建视觉适配器实例；模型和相机仍由适配器在检测时懒加载。"""
+        from task2.behaviors.kitchen_detector import KitchenDetector
 
-        input("[状态0] 硬件就绪，按 Enter 开始比赛...")
-
-        return "1_navigation.py"
-
-
-
-
-
-
+        ctx.detector = KitchenDetector()
