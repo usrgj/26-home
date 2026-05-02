@@ -22,16 +22,17 @@ class KitchenTask(State):
     def execute(self, ctx) -> str:
         """顺序完成餐桌物体播报和架子层类别播报。"""
         detector = _require_detector(ctx)
-        
-        self._scan_table2(ctx, detector)
+
         self._scan_table(ctx, detector)
+        
+        # self._scan_table2(ctx, detector)
         self._scan_shelf(ctx, detector)
 
         return "release"
     
     def _scan_table2(self, ctx, detector: KitchenDetector) -> None:
         """导航到餐桌并识别餐桌上的待整理物品。"""
-        # safe_speak("I am moving to the kitchen table.")
+        safe_speak("I am moving to the kitchen table.")
         ok = navigate_to_station(config.STATION_TABLE2, timeout=config.NAV_TIMEOUT)
         if not ok:
             raise RuntimeError("导航到餐桌失败")
@@ -54,7 +55,7 @@ class KitchenTask(State):
 
     def _scan_table(self, ctx, detector: KitchenDetector) -> None:
         """导航到餐桌并识别餐桌上的待整理物品。"""
-        # safe_speak("I am moving to the kitchen table.")
+        safe_speak("I am moving to the kitchen table.")
         ok = navigate_to_station(config.STATION_TABLE, timeout=config.NAV_TIMEOUT)
         if not ok:
             raise RuntimeError("导航到餐桌失败")
@@ -77,7 +78,7 @@ class KitchenTask(State):
 
     def _scan_shelf(self, ctx, detector: KitchenDetector) -> None:
         """导航到橱柜并感知货架物品和早餐物品线索。"""
-        # safe_speak("I am moving to the cabinet to inspect the shelf.")
+        safe_speak("I am moving to the cabinet to inspect the shelf.")
         ok = navigate_to_station(config.STATION_CABINET, timeout=config.NAV_TIMEOUT)
         if not ok:
             ctx.nav_failures += 1
