@@ -36,6 +36,8 @@ from task1 import config
 from task1.behaviors.vision.client import analyze_person_features
 from task1.behaviors.vision import (GazeAPI,SeatManager)
 
+from common.utils.voice_speak import speak_async
+
 _DEFAULT_DETECTION_CONF = 0.35
 _GUEST_CROP_WINDOW_S = 2.0
 _GUEST_CROP_MAX_SAMPLES = 5
@@ -59,11 +61,11 @@ class ReceiveGuest(State):
         self._cam_head = camera_manager.get(CAMERA_HEAD)
         self._cam_chest = camera_manager.get(CAMERA_CHEST)
         self._feature_jobs: dict[int, FeatureExtractionJob] = {}
-        seat_coords1 = [seat["box1"] for seat in config.SEATS]
+        # seat_coords1 = [seat["box1"] for seat in config.SEATS]
         seat_coords2 = [seat["box2"] for seat in config.SEATS]
-        self.seat_manager_1 = SeatManager(seat_coords1, min_empty=1)
-        self.seat_manager_2 = SeatManager(seat_coords2, min_empty=1)
-        self.final_empty_indices = []
+        self.seat_manager_1 = SeatManager(seat_coords2, min_empty=1) #现场中 预设的观察点二 作为启动的位置，所以把box2传进去
+        # self.seat_manager_2 = SeatManager(seat_coords2, min_empty=1)
+        self.empty_id = []
 
     def execute(self, ctx) -> str:
         from common.utils.drag_and_play.dragTeach_play import play_robot_trajectory
@@ -71,6 +73,8 @@ class ReceiveGuest(State):
         self.gaze_api = GazeAPI(self._model)
         self._feature_jobs = {}
         voice_assistant.set_recording(1)
+        
+        need_observation = True
 
         # === 主流程循环，每次迎接一位客人 ===
         while ctx.current_guest_index < len(ctx.guests):
@@ -83,10 +87,12 @@ class ReceiveGuest(State):
             wait_nav(timeout=config.NAV_TIMEOUT)
 
             # ==============================================
-            # 【回到观察点1 → 立即检测座位】
+            # 只在开始的地方观察
             # ==============================================
 
-            if ctx.seats[1]["occupied"] is None or ctx.seats[3]["occupied"] is None:
+            if need_observation:
+                need_observation = False
+                
                 for _ in range(5):
                     color_frame, _ = self._cam_chest.get_frames()
                     if color_frame is None:
@@ -106,6 +112,7 @@ class ReceiveGuest(State):
                     time.sleep(0.08)
                 seat_status1 = self.seat_manager_1.seat_status.copy()
                 empty_indices1 = [i for i, s in enumerate(seat_status1) if s == "empty"]
+                
                 print("【观察点1 座位状态】", seat_status1)
                 print("【观察点1 空座位编号】", empty_indices1)
                 
@@ -118,13 +125,42 @@ class ReceiveGuest(State):
                         ctx.occupy_seat(ctx.seats[i].get("id"))
                     # elif status == "unclear":
                     #     ctx.release_seat(ctx.seats[i].get("id"))
-                    
+            
+                # 再基于 ctx 做场地规则推断
+                '''
+                现在我们在第一个观察点，
+                也就是开始等待的位置，
+                就能看到4个座位的就坐情况。
+                已知，如果观察到的"empty"个数大于等于2，那么可以直接正常更新座位状态。
+                如果只能观察到一个空座位，那么剩下一个状态未知的位置就一定是空座位。
+                理想不存在识别到0个空座位的情况。
+                '''
+                free_indices = [
+                    i for i, seat in enumerate(ctx.seats)
+                    if seat["occupied"] is False
+                ]
+                unknown_indices = [
+                    i for i, seat in enumerate(ctx.seats)
+                    if seat["occupied"] is None
+                ]
+
+                if len(free_indices) == 1 and len(unknown_indices) == 1:
+                    inferred_idx = unknown_indices[0]
+                    ctx.release_seat(ctx.seats[inferred_idx].get("id"))
+                    print("【观察点1 推断空座位编号】", inferred_idx)
+                elif len(free_indices) == 0:
+                    print("【观察点1 警告】未识别到空座，与场地假设不符")
+            
             seat_id = ctx.find_free_seat() 
             # print(ctx.seats)
             # print(seat_id)
                         
 
-            # 等待门铃 TO OPEN
+            # 等待门铃 
+            
+            # 先转过去，争点时间
+            agv.rotate(math.radians(55), vw=math.radians(30))
+            
             doorbell.start()
             is_detected = doorbell.wait_for_doorbell(timeout=30)
             doorbell.stop()
@@ -172,13 +208,15 @@ class ReceiveGuest(State):
             agv.navigate_to("", agv.get_current_station(), angle=math.radians(120))
             voice_assistant.speak("Please follow me, and I'll get you a seat.")
               
-
+              
+            # 不需要第二个观察点了
+            '''
             if seat_id is  None or( ctx.seats[0]["occupied"] is None and ctx.seats[1]["occupied"]):
-                '''
-                首先，没有空座位一定要去。
-                其次，如果第一次识别到了第二个座位有人，那么最好也去更新，因为这样可以获取第一个座位的情况
-                可以带到第一个座位去
-                '''
+                
+                #首先，没有空座位一定要去。
+                #其次，如果第一次识别到了第二个座位有人，那么最好也去更新，因为这样可以获取第一个座位的情况
+                #可以带到第一个座位去
+                
                 
                 # 观察点1 无空座  才去 观察点2 检测
                 agv.navigate_to(agv.get_current_station(), config.STATION_OBSERVATION)
@@ -222,8 +260,12 @@ class ReceiveGuest(State):
                 # print(ctx.seats) # DEBUG
                 seat_id = ctx.find_free_seat()
                     
+            '''
+            
+            
             # 导航与引导就坐
             if seat_id :
+                speak_async(config.SPEAK_SEATS[seat_id])
                 
                 ctx.guests[guest_index].seat_id = seat_id
                 ctx.occupy_seat(seat_id)

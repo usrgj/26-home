@@ -64,7 +64,8 @@ class TaskContext:
         
         if self.current_guest_index == 0:
             # 优先选择离开始点近的座位
-            for s in self.seats:
+            for i in [2, 3, 0, 1, 4]:
+                s = self.seats[i]
                 if s["occupied"] is False :
                     return s["id"]
                 

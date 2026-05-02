@@ -30,7 +30,7 @@ import pyaudio
 DOORBELL_ENABLED = True          # 测试时可保留，但流程中会跳过
 INPUT_DEVICE_INDEX = None
 RECORD_DURATION = 1.5
-SIMILARITY_THRESHOLD = 0.75
+SIMILARITY_THRESHOLD = 0.35
 SMOOTHING_WINDOW = 5
 COOLDOWN_SECONDS = 0.5
 
@@ -91,63 +91,59 @@ def safe_filename(text: str, max_len=100) -> str:
 
 # ---------- 名字提取优化 ----------
 def _normalize_name(name: str) -> str:
-    """将识别出的名字纠正为标准形式（针对英文）"""
+    """将识别出的名字纠正为标准形式（英文）"""
     if not name:
         return name
-    # 标准名字列表（首字母大写）
     known_names = ["Jack", "John", "Richard", "Allen", "Mike", "Grace", "Linda", "Lily", "Lucy", "Jennier"]
     # 常见错误映射（不区分大小写）
     correction_map = {
-        "rechard": "Richard",
-        "richord": "Richard",
-        "recard": "Richard",
-        "jenny": "Jennier",
-        "jennie": "Jennier",
-        "jennifer": "Jennier",
-        "gennifer": "Jennier",
-        "jenn": "Jennier",
-        "jhon": "John",
-        "jon": "John",
+        "rechard": "Richard", "richord": "Richard", "recard": "Richard",
+        "jenny": "Jennier", "jennie": "Jennier", "jennifer": "Jennier",
+        "gennifer": "Jennier", "jenn": "Jennier",
+        "grace": "Grace", "gracy": "Grace",
+        "jhon": "John", "jon": "John",
         "mikey": "Mike",
-        "lucyy": "Lucy",
-        "lindaa": "Linda",
-        "gracy": "Grace",
+        "lucyy": "Lucy", "lindaa": "Linda",
+        "lilyy": "Lily",
     }
     lower_name = name.lower()
-    # 精确匹配或前缀匹配
+    # 1. 精确匹配或前缀匹配
     for wrong, correct in correction_map.items():
         if lower_name == wrong or lower_name.startswith(wrong):
             return correct
-    # 模糊匹配最接近的标准名字
+    # 2. 模糊匹配（用于轻微拼写错误）
+    from difflib import get_close_matches
     matches = get_close_matches(lower_name, [n.lower() for n in known_names], n=1, cutoff=0.6)
     if matches:
         for kn in known_names:
             if kn.lower() == matches[0]:
                 return kn
-    # 如果识别结果本身就在标准列表中（或首字母大写形式），直接返回
-    if name in known_names or name.capitalize() in known_names:
-        return name.capitalize()
-    return name
+    # 3. 直接标准化首字母大写后检查
+    capitalized = name.capitalize()
+    if capitalized in known_names:
+        return capitalized
+    return name.capitalize()  # 返回规范形式而非原样
 
 def extract_name_en(text):
     if not text:
         return None
 
-    # 1. 转为小写用于前缀匹配（但保留原大小写用于最后返回）
+    # 1. 转为小写用于前缀匹配
     lower_text = text.lower()
-    cleaned = text  # 默认原始文本
+    cleaned = text
 
-    # 2. 常见前缀列表（按长度从长到短排序，避免误匹配）
+    # 2. 去除常见前缀
     prefixes = [
         "my name is ", "i am ", "i'm ", "name is ", "this is ", "call me ",
-        "i m ", "im ", "un ", "um ", "uh ", "er ", "and ", "so "
+        "i m ", "im ", "un ", "um ", "uh ", "er ", "and ", "so ",
+        "hello ", "hi "  # 新增去除 "hello" 前缀
     ]
     for prefix in prefixes:
         if lower_text.startswith(prefix):
             cleaned = text[len(prefix):]
             break
 
-    # 3. 如果清理后的文本以 "un " 开头（针对 "Un Jack" 情况），再次去除
+    # 3. 针对 "un jack" 情况
     if cleaned.lower().startswith("un "):
         cleaned = cleaned[3:]
 
@@ -159,10 +155,8 @@ def extract_name_en(text):
             if len(name) >= 2 and name[0].isupper():
                 return _normalize_name(name)
 
-    # 5. 正则匹配明确的人名模式
-    patterns = [
-        r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",  # 匹配一个或两个大写开头的单词
-    ]
+    # 5. 正则匹配（首字母大写的单词组合）
+    patterns = [r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"]
     for p in patterns:
         m = re.search(p, cleaned)
         if m:
@@ -170,15 +164,13 @@ def extract_name_en(text):
             if len(name) >= 2 and name[0].isupper():
                 return _normalize_name(name)
 
-    # 6. 后备：提取所有大写开头的单词
-    words = re.findall(r'[A-Z][a-z]+', cleaned)
-    if words:
-        # 如果有多个人名部分，将前两个组合（如 "Jack Smith"）
-        if len(words) >= 2 and len(words[0]) > 1 and len(words[1]) > 1:
-            name = f"{words[0]} {words[1]}"
-        else:
-            name = words[0]
-        return _normalize_name(name)
+    # 6. 提取所有连续的字母（不区分大小写），然后尝试标准化
+    words = re.findall(r'[A-Za-z]+', cleaned)
+    for w in words:
+        normalized = _normalize_name(w)
+        # 确保标准化后的名字在标准列表中
+        if normalized in ["Jack", "John", "Richard", "Allen", "Mike", "Grace", "Linda", "Lily", "Lucy", "Jennier"]:
+            return normalized
 
     return None
 
@@ -610,27 +602,57 @@ if DOORBELL_ENABLED:
             def _listen(self):
                 sim_buffer = collections.deque(maxlen=self.window_size)
                 last_trigger_time = 0
+
+                # 预计算背景噪声基底（前5秒的平均RMS）
+                background_rms = 0.005  # 默认值，会在循环中动态更新
+                rms_history = collections.deque(maxlen=10)
+
                 while self.running:
                     if time.time() - last_trigger_time < self.cooldown:
                         time.sleep(0.2)
                         continue
                     try:
                         audio = sd.rec(int(self.duration * RATE), samplerate=RATE,
-                                       channels=1, dtype='float32', device=self.device_index)
+                                    channels=1, dtype='float32', device=self.device_index)
                         sd.wait()
                         audio = audio.flatten()
+
+                        # 1. 计算 RMS
                         rms = np.sqrt(np.mean(audio**2))
-                        if rms < 0.005:
+
+                        # 动态更新背景噪声基底（取最小 RMS 的 1.2 倍）
+                        rms_history.append(rms)
+                        if len(rms_history) >= 10:
+                            background_rms = min(rms_history) * 1.2
+
+                        # 能量比门槛：RMS 必须大于背景噪底的 2 倍（避免极安静时误判）
+                        energy_ok = (rms > background_rms * 2.0) and (rms > 0.01)
+
+                        if not energy_ok:
                             time.sleep(0.1)
                             continue
+
+                        # 2. 计算频谱质心（快速，只需要均值）
+                        # 用 librosa 计算，注意可能稍慢，可降采样或降低帧长
+                        centroid = np.mean(librosa.feature.spectral_centroid(y=audio, sr=RATE))
+                        centroid_ok = (1500 < centroid < 5000)  # 门铃质心范围，可根据实际情况调整
+
+                        # 3. 计算余弦相似度
                         sim = compute_similarity(audio, self.ref_features, RATE)
                         sim_buffer.append(sim)
                         avg_sim = np.mean(sim_buffer)
-                        print(f"[门铃] 相似度={sim:.3f} 平滑={avg_sim:.3f} 阈值={self.threshold}")
-                        if avg_sim > self.threshold:
+                        sim_ok = (avg_sim > self.threshold)
+
+                        # 综合判决
+                        is_match = sim_ok and energy_ok and centroid_ok
+
+                        print(f"[门铃] 相似度={sim:.3f}平滑={avg_sim:.3f} | RMS={rms:.4f}噪底={background_rms:.4f} | 质心={centroid:.0f} | 触发={is_match}")
+                        if is_match:
                             print("[门铃] ✅ 检测到匹配的门铃声！")
                             self.doorbell_detected.set()
                             last_trigger_time = time.time()
+                            # 可选：触发后短暂禁用，避免连续触发
+                            # self.disable()  # 如果需要外部重新 enable 可启用
                     except Exception as e:
                         print(f"[门铃] 检测错误: {e}")
                         time.sleep(0.5)

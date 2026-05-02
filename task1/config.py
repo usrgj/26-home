@@ -19,7 +19,7 @@ SEATS = [
     {"id": "seat_1", "occupied": None, "box1": [0, 0, 0, 0], "box2": [138, 11, 239, 190]},  # box1 是在第一个观察位置看到的座位框，box2 是在第二个观察位置看到的座位框，如果某个位置看不到这个座位就设为 [0,0,0,0]
     {"id": "seat_2", "occupied": None, "box1": [375, 146, 637, 444], "box2": [0, 0, 0, 0]},
     {"id": "seat_3", "occupied": None, "box1": [0,0,0,0 ], "box2": [210, 132, 404, 338]},
-    {"id": "seat_4", "occupied": None, "box1": [230, 23, 330, 103], "box2": [0, 0, 0, 0]},
+    {"id": "seat_4", "occupied": None, "box1": [230, 23, 330, 103], "box2": [543, 140, 640, 295]},
     {"id": "seat_5", "occupied": None, "box1": [0, 0, 0, 0], "box2": [354, 10, 464, 125]},
 ]
 PRE_OCCUPIED_SEATS = []
@@ -84,3 +84,10 @@ TRAJECTORY_GET_PATH = "/home/blinx/26-home/common/utils/drag_and_play/open_door_
 TRAJECTORY_MOVE_PATH = "/home/blinx/26-home/common/utils/drag_and_play/open_door_trajectory/move.txt"
 TRAJECTORY_LEAVE_PATH = "/home/blinx/26-home/common/utils/drag_and_play/open_door_trajectory/leave.txt"
 
+# 场地定义的座位位置和预设的不同，所以这里定义一个映射
+SPEAK_SEATS = {
+    "seat_1": "the second seat",
+    "seat_2": "the third seat",
+    "seat_3": "the fourth seat",
+    "seat_4": "the fifth seat",
+    "seat_5": "the first seat",}
