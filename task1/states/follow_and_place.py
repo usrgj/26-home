@@ -37,7 +37,8 @@ class FollowAndPlace(State):
         slide_control.send_axis(-2000000)
         pan_tilt.home()
         from common.utils.voice_speak import speak_async
-        speak_async('Say follow me and I will follow you.')
+        _safe_speak("I will follow you. Please say put it here when you want me to place the bag.")
+
         wait_nav(timeout=config.NAV_TIMEOUT)
         robot_api = getattr(ctx, "follow_robot_api", None)
         runner = FollowRunner(robot_api=robot_api)
@@ -54,7 +55,7 @@ class FollowAndPlace(State):
             
         
         
-        
+        _safe_speak('Let\'s go!')
         follow_started_at = time.time()
         
         #持续监听放包指令 author: mhl
@@ -69,7 +70,6 @@ class FollowAndPlace(State):
         )
         
 
-        _safe_speak("I will follow you. Please say put it here when you want me to place the bag.")
         listener_thread.start()
 
         try:
